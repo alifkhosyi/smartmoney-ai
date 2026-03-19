@@ -32,7 +32,6 @@ webhook.post('/webhook', async (c) => {
     console.log(`Message from ${from}: ${text}`)
 
     try {
-      // Cek atau buat user
       let { data: user } = await supabase
         .from('users')
         .select('*')
@@ -55,7 +54,7 @@ webhook.post('/webhook', async (c) => {
 
       // Command: bantuan
       if (cmd === 'bantuan' || cmd === 'help') {
-        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — lihat total saldo\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
+        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
         return c.json({ status: 'ok' })
       }
 
@@ -127,6 +126,80 @@ webhook.post('/webhook', async (c) => {
         }).join('\n')
 
         await sendMessage(from, `📅 *Transaksi Hari Ini*\n\n${list}\n\n📈 Masuk: Rp ${fmt(income)}\n📉 Keluar: Rp ${fmt(expense)}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: minggu ini
+      if (cmd === 'minggu ini' || cmd === 'weekly') {
+        const weekAgo = new Date()
+        weekAgo.setDate(weekAgo.getDate() - 7)
+
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', weekAgo.toISOString())
+          .order('created_at', { ascending: false })
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi minggu ini. Yuk catat! 📝')
+          return c.json({ status: 'ok' })
+        }
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+        const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+
+        const byCategory: Record<string, number> = {}
+        transactions.filter(t => t.type === 'expense').forEach(t => {
+          byCategory[t.category] = (byCategory[t.category] || 0) + t.amount
+        })
+        const categoryList = Object.entries(byCategory)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([cat, amt]) => `  • ${cat}: Rp ${fmt(amt)}`)
+          .join('\n')
+
+        await sendMessage(from, `📊 *Laporan Minggu Ini*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Selisih: Rp ${fmt(income - expense)}\n\n*Top Pengeluaran:*\n${categoryList || '  Belum ada'}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: bulan ini
+      if (cmd === 'bulan ini' || cmd === 'monthly') {
+        const now = new Date()
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', firstDay.toISOString())
+          .order('created_at', { ascending: false })
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi bulan ini. Yuk catat! 📝')
+          return c.json({ status: 'ok' })
+        }
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+        const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+        const balance = income - expense
+
+        const byCategory: Record<string, number> = {}
+        transactions.filter(t => t.type === 'expense').forEach(t => {
+          byCategory[t.category] = (byCategory[t.category] || 0) + t.amount
+        })
+        const categoryList = Object.entries(byCategory)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([cat, amt]) => `  • ${cat}: Rp ${fmt(amt)}`)
+          .join('\n')
+
+        const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
+        const monthName = months[now.getMonth()]
+
+        await sendMessage(from, `📅 *Laporan ${monthName} ${now.getFullYear()}*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(balance)}\n📊 Total transaksi: ${transactions.length}x\n\n*Top Pengeluaran:*\n${categoryList || '  Belum ada'}`)
         return c.json({ status: 'ok' })
       }
 
