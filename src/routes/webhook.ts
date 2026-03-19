@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { sendMessage } from '../services/whatsapp/client.js'
 import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
+import { updateStreak, getProfile } from '../services/gamification.js'
 
 const webhook = new Hono()
 
@@ -54,7 +55,7 @@ webhook.post('/webhook', async (c) => {
 
       // Command: bantuan
       if (cmd === 'bantuan' || cmd === 'help') {
-        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n- "budget hiburan 200rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
+        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
         return c.json({ status: 'ok' })
       }
 
@@ -232,6 +233,21 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // Command: profil
+      if (cmd === 'profil' || cmd === 'profile') {
+        const profile = await getProfile(user.id)
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+
+        const badgeList = profile.badges.length > 0
+          ? profile.badges.map(b => `${b.badge_emoji} ${b.badge_name}`).join('\n')
+          : '  Belum ada badge. Mulai catat transaksi!'
+
+        const streakEmoji = profile.streak >= 7 ? '🔥' : profile.streak >= 3 ? '⚡' : '✨'
+
+        await sendMessage(from, `👤 *Profil Kamu*\n\n${streakEmoji} Streak: ${profile.streak} hari berturut-turut\n🏆 Streak terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}\n\n*Badge yang diraih:*\n${badgeList}`)
+        return c.json({ status: 'ok' })
+      }
+
       // Command: set budget (format: "budget makan 500rb")
       const budgetMatch = cmd?.match(/^budget\s+(\w+)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)$/i)
       if (budgetMatch) {
@@ -281,6 +297,9 @@ webhook.post('/webhook', async (c) => {
         description: parsed.description,
       })
 
+      // Update streak & cek badge baru
+      const { streak, newBadges } = await updateStreak(user.id)
+
       // Cek budget alert
       let budgetAlert = ''
       if (parsed.type === 'expense') {
@@ -315,7 +334,15 @@ webhook.post('/webhook', async (c) => {
         }
       }
 
-      // Ambil transaksi terakhir untuk insight
+      // Badge notification
+      const badgeText = newBadges.length > 0
+        ? `\n\n🎉 *Badge baru!*\n${newBadges.map(b => `${b.emoji} ${b.name}`).join('\n')}`
+        : ''
+
+      // Streak text
+      const streakText = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
+
+      // Generate AI insight
       const { data: recentTx } = await supabase
         .from('transactions')
         .select('*')
@@ -333,7 +360,7 @@ webhook.post('/webhook', async (c) => {
       const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
       const insightText = insight ? `\n\n💡 *Insight:* ${insight}` : ''
 
-      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${budgetAlert}${insightText}`)
+      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insightText}`)
 
     } catch (err) {
       console.error('Error:', err)
