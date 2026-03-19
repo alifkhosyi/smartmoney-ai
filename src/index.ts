@@ -21,8 +21,8 @@ app.route('/', webhook)
 
 const port = Number(process.env.PORT) || 3000
 
-serve({ fetch: app.fetch, port }, () => {
-  console.log(`SmartMoney AI running on http://localhost:${port}`)
+serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
+  console.log(`SmartMoney AI running on port ${port}`)
 })
 
 export default app
