@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { sendMessage } from '../services/whatsapp/client.js'
-import { parseTransaction } from '../services/ai/parser.js'
+import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 
 const webhook = new Hono()
@@ -212,6 +212,7 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // Simpan ke database
       await supabase.from('transactions').insert({
         user_id: user.id,
         type: parsed.type,
@@ -220,11 +221,26 @@ webhook.post('/webhook', async (c) => {
         description: parsed.description,
       })
 
+      // Ambil transaksi terakhir untuk insight
+      const { data: recentTx } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      // Generate AI insight
+      const insight = await generateInsight(
+        { description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type },
+        recentTx || []
+      )
+
       const emoji = parsed.type === 'income' ? '💰' : '💸'
       const typeText = parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'
       const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+      const insightText = insight ? `\n\n💡 *Insight:* ${insight}` : ''
 
-      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}`)
+      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${insightText}`)
 
     } catch (err) {
       console.error('Error:', err)
