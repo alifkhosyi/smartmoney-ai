@@ -54,7 +54,7 @@ webhook.post('/webhook', async (c) => {
 
       // Command: bantuan
       if (cmd === 'bantuan' || cmd === 'help') {
-        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
+        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n- "budget hiburan 200rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
         return c.json({ status: 'ok' })
       }
 
@@ -68,7 +68,6 @@ webhook.post('/webhook', async (c) => {
         const income = transactions?.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0) || 0
         const expense = transactions?.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0) || 0
         const balance = income - expense
-
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
         await sendMessage(from, `💰 *Ringkasan Keuangan*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(balance)}`)
@@ -119,7 +118,6 @@ webhook.post('/webhook', async (c) => {
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-
         const list = transactions.map(t => {
           const emoji = t.type === 'income' ? '💰' : '💸'
           return `${emoji} ${t.description} — Rp ${fmt(t.amount)}`
@@ -149,7 +147,6 @@ webhook.post('/webhook', async (c) => {
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-
         const byCategory: Record<string, number> = {}
         transactions.filter(t => t.type === 'expense').forEach(t => {
           byCategory[t.category] = (byCategory[t.category] || 0) + t.amount
@@ -185,7 +182,6 @@ webhook.post('/webhook', async (c) => {
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
         const balance = income - expense
-
         const byCategory: Record<string, number> = {}
         transactions.filter(t => t.type === 'expense').forEach(t => {
           byCategory[t.category] = (byCategory[t.category] || 0) + t.amount
@@ -195,11 +191,75 @@ webhook.post('/webhook', async (c) => {
           .slice(0, 5)
           .map(([cat, amt]) => `  • ${cat}: Rp ${fmt(amt)}`)
           .join('\n')
-
         const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
         const monthName = months[now.getMonth()]
 
         await sendMessage(from, `📅 *Laporan ${monthName} ${now.getFullYear()}*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(balance)}\n📊 Total transaksi: ${transactions.length}x\n\n*Top Pengeluaran:*\n${categoryList || '  Belum ada'}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: lihat budget
+      if (cmd === 'budget') {
+        const { data: budgets } = await supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', user.id)
+
+        if (!budgets || budgets.length === 0) {
+          await sendMessage(from, 'Belum ada budget. Set budget dengan cara:\n- "budget makan 500rb"\n- "budget transport 300rb"\n- "budget hiburan 200rb"')
+          return c.json({ status: 'ok' })
+        }
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        const now = new Date()
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('type', 'expense')
+          .gte('created_at', firstDay.toISOString())
+
+        const list = budgets.map(b => {
+          const spent = transactions?.filter(t => t.category === b.category).reduce((sum, t) => sum + t.amount, 0) || 0
+          const pct = Math.round((spent / b.amount) * 100)
+          const bar = pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '🟢'
+          return `${bar} *${b.category}*: Rp ${fmt(spent)} / Rp ${fmt(b.amount)} (${pct}%)`
+        }).join('\n')
+
+        await sendMessage(from, `🎯 *Budget Bulan Ini*\n\n${list}\n\n🟢 Aman  🟡 Hampir habis  🔴 Melebihi`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: set budget (format: "budget makan 500rb")
+      const budgetMatch = cmd?.match(/^budget\s+(\w+)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)$/i)
+      if (budgetMatch) {
+        const category = budgetMatch[1].toLowerCase()
+        const amountStr = budgetMatch[2].toLowerCase().trim()
+        let amount = 0
+
+        if (amountStr.includes('jt') || amountStr.includes('juta')) {
+          amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
+        } else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) {
+          amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
+        } else {
+          amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
+        }
+
+        if (amount > 0) {
+          await supabase.from('budgets').upsert({
+            user_id: user.id,
+            category,
+            amount,
+            period: 'monthly'
+          }, { onConflict: 'user_id,category,period' })
+
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          await sendMessage(from, `✅ *Budget diset!*\n\n🏷️ Kategori: ${category}\n💵 Budget: Rp ${fmt(amount)}/bulan\n\nAku akan notif kamu kalau pengeluaran mendekati batas!`)
+        } else {
+          await sendMessage(from, 'Format budget salah. Coba: "budget makan 500rb"')
+        }
         return c.json({ status: 'ok' })
       }
 
@@ -221,6 +281,40 @@ webhook.post('/webhook', async (c) => {
         description: parsed.description,
       })
 
+      // Cek budget alert
+      let budgetAlert = ''
+      if (parsed.type === 'expense') {
+        const now = new Date()
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+
+        const { data: budget } = await supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('category', parsed.category)
+          .single()
+
+        if (budget) {
+          const { data: txThisMonth } = await supabase
+            .from('transactions')
+            .select('amount')
+            .eq('user_id', user.id)
+            .eq('category', parsed.category)
+            .eq('type', 'expense')
+            .gte('created_at', firstDay.toISOString())
+
+          const totalSpent = txThisMonth?.reduce((sum, t) => sum + t.amount, 0) || 0
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          const pct = Math.round((totalSpent / budget.amount) * 100)
+
+          if (pct >= 100) {
+            budgetAlert = `\n\n🔴 *Budget Alert!* Pengeluaran ${parsed.category} bulan ini sudah *melebihi budget* (${pct}%)! Total: Rp ${fmt(totalSpent)} dari Rp ${fmt(budget.amount)}.`
+          } else if (pct >= 80) {
+            budgetAlert = `\n\n⚠️ *Budget Alert!* Pengeluaran ${parsed.category} sudah ${pct}% dari budget. Sisa Rp ${fmt(budget.amount - totalSpent)} lagi.`
+          }
+        }
+      }
+
       // Ambil transaksi terakhir untuk insight
       const { data: recentTx } = await supabase
         .from('transactions')
@@ -229,7 +323,6 @@ webhook.post('/webhook', async (c) => {
         .order('created_at', { ascending: false })
         .limit(10)
 
-      // Generate AI insight
       const insight = await generateInsight(
         { description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type },
         recentTx || []
@@ -240,7 +333,7 @@ webhook.post('/webhook', async (c) => {
       const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
       const insightText = insight ? `\n\n💡 *Insight:* ${insight}` : ''
 
-      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${insightText}`)
+      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${budgetAlert}${insightText}`)
 
     } catch (err) {
       console.error('Error:', err)
