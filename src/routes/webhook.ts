@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { sendMessage } from '../services/whatsapp/client'
-import { parseTransaction } from '../services/ai/parser'
-import { supabase } from '../lib/supabase'
+import { sendMessage } from '../services/whatsapp/client.js'
+import { parseTransaction } from '../services/ai/parser.js'
+import { supabase } from '../lib/supabase.js'
 
 const webhook = new Hono()
 
@@ -32,7 +32,6 @@ webhook.post('/webhook', async (c) => {
     console.log(`Message from ${from}: ${text}`)
 
     try {
-      // Cek user sudah ada atau buat baru
       let { data: user } = await supabase
         .from('users')
         .select('*')
@@ -51,7 +50,6 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
-      // Parse transaksi dengan AI
       const parsed = await parseTransaction(text)
       console.log('Parsed:', parsed)
 
@@ -60,7 +58,6 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
-      // Simpan ke database
       await supabase.from('transactions').insert({
         user_id: user.id,
         type: parsed.type,
@@ -69,7 +66,6 @@ webhook.post('/webhook', async (c) => {
         description: parsed.description,
       })
 
-      // Balas ke user
       const emoji = parsed.type === 'income' ? '💰' : '💸'
       const typeText = parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'
       const amountFormatted = new Intl.NumberFormat('id-ID').format(parsed.amount)

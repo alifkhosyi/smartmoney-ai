@@ -1,8 +1,8 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { config } from 'dotenv'
-import webhook from './routes/webhook'
-import { supabase } from './lib/supabase'
+import webhook from './routes/webhook.js'
+import { supabase } from './lib/supabase.js'
 
 config()
 
