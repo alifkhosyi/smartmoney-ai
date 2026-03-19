@@ -27,11 +27,12 @@ webhook.post('/webhook', async (c) => {
 
   if (message) {
     const from = message.from
-    const text = message?.text?.body
+    const text = message?.text?.body?.trim()
 
     console.log(`Message from ${from}: ${text}`)
 
     try {
+      // Cek atau buat user
       let { data: user } = await supabase
         .from('users')
         .select('*')
@@ -46,15 +47,95 @@ webhook.post('/webhook', async (c) => {
           .single()
         user = newUser
 
-        await sendMessage(from, 'Halo! Selamat datang di SmartMoney AI 👋\n\nAku akan bantu catat keuanganmu. Langsung ketik transaksimu, contoh:\n- "makan siang 35rb"\n- "gajian 5jt"\n- "gopay 150rb bensin"')
+        await sendMessage(from, 'Halo! Selamat datang di *SmartMoney AI* 👋\n\nAku asisten keuanganmu. Langsung ketik transaksimu:\n- "makan siang 35rb"\n- "gajian 5jt"\n- "gopay 150rb bensin"\n\nKetik *bantuan* untuk lihat semua fitur.')
         return c.json({ status: 'ok' })
       }
 
+      const cmd = text?.toLowerCase()
+
+      // Command: bantuan
+      if (cmd === 'bantuan' || cmd === 'help') {
+        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — lihat total saldo\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: saldo
+      if (cmd === 'saldo' || cmd === 'balance') {
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('type, amount')
+          .eq('user_id', user.id)
+
+        const income = transactions?.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0) || 0
+        const expense = transactions?.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0) || 0
+        const balance = income - expense
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+
+        await sendMessage(from, `💰 *Ringkasan Keuangan*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(balance)}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: riwayat
+      if (cmd === 'riwayat' || cmd === 'history') {
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5)
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi. Yuk mulai catat! 📝')
+          return c.json({ status: 'ok' })
+        }
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        const list = transactions.map((t, i) => {
+          const emoji = t.type === 'income' ? '💰' : '💸'
+          return `${i + 1}. ${emoji} ${t.description} — Rp ${fmt(t.amount)}\n    🏷️ ${t.category}`
+        }).join('\n\n')
+
+        await sendMessage(from, `📋 *5 Transaksi Terakhir*\n\n${list}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: hari ini
+      if (cmd === 'hari ini' || cmd === 'today') {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        const { data: transactions } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', today.toISOString())
+          .order('created_at', { ascending: false })
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi hari ini. Yuk catat! 📝')
+          return c.json({ status: 'ok' })
+        }
+
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+        const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+
+        const list = transactions.map(t => {
+          const emoji = t.type === 'income' ? '💰' : '💸'
+          return `${emoji} ${t.description} — Rp ${fmt(t.amount)}`
+        }).join('\n')
+
+        await sendMessage(from, `📅 *Transaksi Hari Ini*\n\n${list}\n\n📈 Masuk: Rp ${fmt(income)}\n📉 Keluar: Rp ${fmt(expense)}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Default: AI parsing transaksi
       const parsed = await parseTransaction(text)
       console.log('Parsed:', parsed)
 
       if (parsed.type === 'unknown' || parsed.amount === 0) {
-        await sendMessage(from, 'Hmm, aku kurang paham maksudnya. Coba ketik seperti ini:\n- "makan 25rb"\n- "gaji 5jt"\n- "bensin gopay 50rb"')
+        await sendMessage(from, 'Hmm, aku kurang paham. Coba ketik:\n- "makan 25rb"\n- "gaji 5jt"\n- "bensin gopay 50rb"\n\nAtau ketik *bantuan* untuk lihat menu.')
         return c.json({ status: 'ok' })
       }
 
@@ -68,9 +149,9 @@ webhook.post('/webhook', async (c) => {
 
       const emoji = parsed.type === 'income' ? '💰' : '💸'
       const typeText = parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'
-      const amountFormatted = new Intl.NumberFormat('id-ID').format(parsed.amount)
+      const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
-      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${amountFormatted}\n👛 ${parsed.wallet}`)
+      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}`)
 
     } catch (err) {
       console.error('Error:', err)
