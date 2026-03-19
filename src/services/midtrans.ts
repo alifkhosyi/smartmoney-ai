@@ -1,4 +1,5 @@
-import midtransClient from 'midtrans-client'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const midtransClient = require('midtrans-client')
 
 const snap = new midtransClient.Snap({
   isProduction: process.env.MIDTRANS_ENV === 'production',
@@ -43,6 +44,7 @@ export async function createPaymentLink(
 }
 
 export async function verifyPayment(orderId: string): Promise<string> {
-  const status = await core.transaction.status(orderId)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const status = await (core as any).transaction.status(orderId)
   return status.transaction_status
 }
