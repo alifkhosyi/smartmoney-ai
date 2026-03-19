@@ -6,6 +6,12 @@ const snap = new midtransClient.Snap({
   clientKey: process.env.MIDTRANS_CLIENT_KEY || ''
 })
 
+const core = new midtransClient.CoreApi({
+  isProduction: process.env.MIDTRANS_ENV === 'production',
+  serverKey: process.env.MIDTRANS_SERVER_KEY || '',
+  clientKey: process.env.MIDTRANS_CLIENT_KEY || ''
+})
+
 export async function createPaymentLink(
   userId: string,
   phone: string,
@@ -37,11 +43,6 @@ export async function createPaymentLink(
 }
 
 export async function verifyPayment(orderId: string): Promise<string> {
-  const core = new midtransClient.CoreApi({
-    isProduction: process.env.MIDTRANS_ENV === 'production',
-    serverKey: process.env.MIDTRANS_SERVER_KEY || ''
-  })
-
   const status = await core.transaction.status(orderId)
   return status.transaction_status
 }
