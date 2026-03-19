@@ -3,6 +3,7 @@ import { sendMessage } from '../services/whatsapp/client.js'
 import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
+import { createPaymentLink } from '../services/midtrans.js'
 
 const webhook = new Hono()
 
@@ -17,6 +18,54 @@ webhook.get('/webhook', (c) => {
   }
 
   return c.json({ error: 'Forbidden' }, 403)
+})
+
+// Midtrans payment notification webhook
+webhook.post('/payment-notification', async (c) => {
+  const body = await c.req.json()
+  console.log('Payment notification:', body)
+
+  const orderId = body.order_id
+  const transactionStatus = body.transaction_status
+  const fraudStatus = body.fraud_status
+
+  if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
+    if (fraudStatus === 'accept' || transactionStatus === 'settlement') {
+      // Extract userId from orderId format: smartmoney-{userId}-{timestamp}
+      const parts = orderId.split('-')
+      const userId = parts[1]
+
+      if (userId) {
+        // Update user to premium
+        const premiumUntil = new Date()
+        premiumUntil.setMonth(premiumUntil.getMonth() + 1)
+
+        await supabase
+          .from('users')
+          .update({
+            is_premium: true,
+            premium_until: premiumUntil.toISOString()
+          })
+          .eq('id', userId)
+
+        // Get user phone and notify
+        const { data: user } = await supabase
+          .from('users')
+          .select('phone')
+          .eq('id', userId)
+          .single()
+
+        if (user) {
+          await sendMessage(
+            user.phone,
+            `🌟 *Selamat! Kamu sekarang Premium!*\n\n✅ Akses semua fitur premium aktif\n📅 Berlaku hingga: ${premiumUntil.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\nKetik *laporan* untuk generate PDF report pertamamu! 🎉`
+          )
+        }
+      }
+    }
+  }
+
+  return c.json({ status: 'ok' })
 })
 
 webhook.post('/webhook', async (c) => {
@@ -55,7 +104,24 @@ webhook.post('/webhook', async (c) => {
 
       // Command: bantuan
       if (cmd === 'bantuan' || cmd === 'help') {
-        await sendMessage(from, '*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini')
+        const premiumInfo = user.is_premium
+          ? '\n⭐ *Status: Premium* — Ketik *laporan* untuk PDF report'
+          : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
+
+        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: upgrade / premium
+      if (cmd === 'upgrade' || cmd === 'premium' || cmd === 'bayar') {
+        if (user.is_premium) {
+          const until = new Date(user.premium_until)
+          await sendMessage(from, `⭐ *Kamu sudah Premium!*\n\nAktif hingga: ${until.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\nKetik *laporan* untuk generate PDF report bulanan.`)
+          return c.json({ status: 'ok' })
+        }
+
+        const paymentUrl = await createPaymentLink(user.id, from, 'premium')
+        await sendMessage(from, `🌟 *Upgrade ke SmartMoney AI Premium!*\n\nDapatkan fitur eksklusif:\n✅ Laporan PDF bulanan otomatis\n✅ Analisis AI mendalam\n✅ Export data Excel\n✅ Prioritas support\n\n💵 Hanya *Rp 29.000/bulan*\n\n👇 *Bayar sekarang:*\n${paymentUrl}\n\n_Link berlaku 24 jam. Setelah bayar, fitur langsung aktif otomatis._`)
         return c.json({ status: 'ok' })
       }
 
@@ -236,15 +302,15 @@ webhook.post('/webhook', async (c) => {
       // Command: profil
       if (cmd === 'profil' || cmd === 'profile') {
         const profile = await getProfile(user.id)
-        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
         const badgeList = profile.badges.length > 0
           ? profile.badges.map(b => `${b.badge_emoji} ${b.badge_name}`).join('\n')
           : '  Belum ada badge. Mulai catat transaksi!'
 
         const streakEmoji = profile.streak >= 7 ? '🔥' : profile.streak >= 3 ? '⚡' : '✨'
+        const premiumStatus = user.is_premium ? '\n⭐ Status: *Premium*' : '\n💎 Status: Gratis — ketik *upgrade* untuk premium'
 
-        await sendMessage(from, `👤 *Profil Kamu*\n\n${streakEmoji} Streak: ${profile.streak} hari berturut-turut\n🏆 Streak terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}\n\n*Badge yang diraih:*\n${badgeList}`)
+        await sendMessage(from, `👤 *Profil Kamu*\n\n${streakEmoji} Streak: ${profile.streak} hari berturut-turut\n🏆 Streak terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}${premiumStatus}\n\n*Badge yang diraih:*\n${badgeList}`)
         return c.json({ status: 'ok' })
       }
 

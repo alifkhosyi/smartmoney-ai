@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartMoney AI — Asisten Keuangan Pribadimu di WhatsApp</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --green: #0F6E56;
+    --green-light: #E1F5EE;
+    --green-mid: #1D9E75;
+    --green-dark: #085041;
+    --text: #1a1a1a;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --bg: #fafaf8;
+    --white: #ffffff;
+    --serif: 'Instrument Serif', Georgia, serif;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1.2rem 6%;
+    background: rgba(250,250,248,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--sans); font-weight: 600; font-size: 1.1rem; color: var(--text);
+    text-decoration: none;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px; background: var(--green);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  }
+
+  .logo-icon svg { width: 20px; height: 20px; fill: white; }
+
+  .nav-links { display: flex; align-items: center; gap: 2rem; list-style: none; }
+  .nav-links a { font-size: 0.9rem; color: var(--text-muted); text-decoration: none; transition: color 0.2s; font-weight: 400; }
+  .nav-links a:hover { color: var(--green); }
+
+  .btn-nav {
+    background: var(--green); color: white; padding: 0.55rem 1.4rem;
+    border-radius: 8px; font-size: 0.9rem; font-weight: 500; text-decoration: none;
+    transition: background 0.2s; font-family: var(--sans);
+  }
+  .btn-nav:hover { background: var(--green-dark); color: white; }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    display: flex; align-items: center;
+    padding: 7rem 6% 5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-bg {
+    position: absolute; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse 80% 60% at 60% 50%, #E1F5EE 0%, transparent 70%);
+  }
+
+  .hero-content { position: relative; z-index: 1; max-width: 620px; }
+
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--green-light); color: var(--green-dark);
+    padding: 0.4rem 1rem; border-radius: 100px;
+    font-size: 0.82rem; font-weight: 500; margin-bottom: 2rem;
+    border: 1px solid #9FE1CB;
+  }
+
+  .badge-dot {
+    width: 7px; height: 7px; background: var(--green-mid); border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  .hero h1 {
+    font-family: var(--serif);
+    font-size: clamp(2.8rem, 5vw, 4rem);
+    line-height: 1.15;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+    font-weight: 400;
+  }
+
+  .hero h1 em {
+    font-style: italic;
+    color: var(--green);
+  }
+
+  .hero p {
+    font-size: 1.1rem; color: var(--text-muted); line-height: 1.7;
+    margin-bottom: 2.5rem; max-width: 520px;
+    font-weight: 300;
+  }
+
+  .hero-cta { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--green); color: white;
+    padding: 0.9rem 2rem; border-radius: 10px;
+    font-size: 1rem; font-weight: 500; text-decoration: none;
+    transition: transform 0.2s, background 0.2s; font-family: var(--sans);
+  }
+  .btn-primary:hover { background: var(--green-dark); transform: translateY(-1px); }
+  .btn-primary svg { width: 20px; height: 20px; fill: white; }
+
+  .btn-ghost {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--text); padding: 0.9rem 1.5rem; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 400; text-decoration: none;
+    border: 1px solid var(--border); background: var(--white);
+    transition: border-color 0.2s; font-family: var(--sans);
+  }
+  .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+
+  .hero-stats {
+    display: flex; gap: 3rem; margin-top: 3.5rem;
+    padding-top: 2rem; border-top: 1px solid var(--border);
+  }
+
+  .stat-item { }
+  .stat-num { font-family: var(--serif); font-size: 2rem; color: var(--text); font-weight: 400; display: block; }
+  .stat-label { font-size: 0.82rem; color: var(--text-muted); font-weight: 400; }
+
+  /* PHONE MOCKUP */
+  .hero-visual {
+    position: absolute; right: 6%; top: 50%; transform: translateY(-50%);
+    z-index: 1;
+  }
+
+  .phone {
+    width: 300px;
+    background: #1a1a1a;
+    border-radius: 36px;
+    padding: 14px;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.18), 0 0 0 1px rgba(255,255,255,0.06);
+    animation: float 4s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-12px); }
+  }
+
+  .phone-inner {
+    background: #f5f5f0;
+    border-radius: 26px;
+    overflow: hidden;
+    min-height: 580px;
+  }
+
+  .phone-bar {
+    background: #075E54;
+    padding: 14px 16px 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .wa-avatar {
+    width: 36px; height: 36px; background: var(--green-mid);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;
+  }
+
+  .wa-name { font-size: 13px; font-weight: 600; color: white; }
+  .wa-status { font-size: 10px; color: rgba(255,255,255,0.7); }
+
+  .chat-body { padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; background: #ECE5DD url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+
+  .msg { max-width: 82%; font-size: 11.5px; line-height: 1.5; padding: 7px 10px; border-radius: 8px; }
+  .msg-user { background: #DCF8C6; align-self: flex-end; border-bottom-right-radius: 2px; color: #1a1a1a; }
+  .msg-bot { background: white; align-self: flex-start; border-bottom-left-radius: 2px; color: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+  .msg-time { font-size: 9px; color: #9e9e9e; text-align: right; margin-top: 2px; }
+  .msg strong { font-weight: 600; }
+
+  /* SECTION SHARED */
+  section { padding: 6rem 6%; }
+
+  .section-label {
+    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--green); margin-bottom: 1rem;
+  }
+
+  .section-title {
+    font-family: var(--serif);
+    font-size: clamp(2rem, 3.5vw, 2.8rem);
+    line-height: 1.2; font-weight: 400; color: var(--text);
+    margin-bottom: 1rem;
+  }
+
+  .section-title em { font-style: italic; color: var(--green); }
+
+  .section-sub {
+    font-size: 1.05rem; color: var(--text-muted); max-width: 540px;
+    line-height: 1.7; font-weight: 300;
+  }
+
+  /* PROBLEM */
+  .problem { background: var(--text); color: white; }
+  .problem .section-label { color: #5DCAA5; }
+  .problem .section-title { color: white; }
+  .problem .section-title em { color: #5DCAA5; }
+  .problem .section-sub { color: rgba(255,255,255,0.6); }
+
+  .pain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1px; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+    overflow: hidden; margin-top: 3rem;
+  }
+
+  .pain-item {
+    padding: 2rem; background: #1a1a1a;
+    transition: background 0.2s;
+  }
+  .pain-item:hover { background: #222; }
+
+  .pain-icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 1.2rem; font-size: 20px;
+  }
+
+  .pain-item h3 { font-size: 1rem; font-weight: 500; color: white; margin-bottom: 0.5rem; }
+  .pain-item p { font-size: 0.88rem; color: rgba(255,255,255,0.5); line-height: 1.6; font-weight: 300; }
+
+  /* HOW IT WORKS */
+  .how { background: var(--white); }
+
+  .steps {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 2rem; margin-top: 3.5rem; position: relative;
+  }
+
+  .steps::before {
+    content: '';
+    position: absolute; top: 28px; left: 16%; right: 16%;
+    height: 1px; background: linear-gradient(90deg, var(--green-light), var(--green-mid), var(--green-light));
+    z-index: 0;
+  }
+
+  .step { text-align: center; position: relative; z-index: 1; }
+
+  .step-num {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--green); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 1.4rem;
+    margin: 0 auto 1.5rem; border: 4px solid var(--white);
+    box-shadow: 0 0 0 2px var(--green-light);
+  }
+
+  .step h3 { font-size: 1.05rem; font-weight: 500; color: var(--text); margin-bottom: 0.6rem; }
+  .step p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.6; font-weight: 300; }
+
+  /* FEATURES */
+  .features { background: var(--bg); }
+
+  .features-header { max-width: 600px; margin-bottom: 3.5rem; }
+
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .feat-card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 16px; padding: 2rem;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .feat-card:hover { border-color: var(--green-mid); transform: translateY(-3px); }
+
+  .feat-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: var(--green-light); display: flex; align-items: center; justify-content: center;
+    margin-bottom: 1.2rem; font-size: 22px;
+  }
+
+  .feat-card h3 { font-size: 1.05rem; font-weight: 500; color: var(--text); margin-bottom: 0.5rem; }
+  .feat-card p { font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; font-weight: 300; }
+
+  /* PRICING */
+  .pricing { background: var(--white); }
+  .pricing-header { text-align: center; margin-bottom: 3.5rem; }
+  .pricing-header .section-sub { margin: 0 auto; }
+
+  .pricing-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem; max-width: 700px; margin: 0 auto;
+  }
+
+  .price-card {
+    border: 1px solid var(--border); border-radius: 20px; padding: 2.5rem;
+    background: var(--white); position: relative;
+  }
+
+  .price-card.featured {
+    border-color: var(--green); border-width: 2px;
+    background: linear-gradient(135deg, #f0fdf8 0%, var(--white) 100%);
+  }
+
+  .price-badge {
+    position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    background: var(--green); color: white; font-size: 0.75rem; font-weight: 600;
+    padding: 4px 16px; border-radius: 100px; white-space: nowrap;
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+
+  .price-name { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+  .price-amount { font-family: var(--serif); font-size: 3rem; color: var(--text); line-height: 1; margin-bottom: 0.3rem; }
+  .price-period { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 2rem; }
+
+  .price-features { list-style: none; margin-bottom: 2rem; display: flex; flex-direction: column; gap: 0.8rem; }
+  .price-features li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--text); }
+  .price-features li::before {
+    content: ''; width: 18px; height: 18px; background: var(--green-light);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 18 18' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 9l3 3 5-5' stroke='%230F6E56' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E");
+    background-size: cover;
+  }
+
+  .btn-full {
+    display: block; text-align: center;
+    background: var(--green); color: white;
+    padding: 0.9rem; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 500; text-decoration: none;
+    transition: background 0.2s; font-family: var(--sans);
+  }
+  .btn-full:hover { background: var(--green-dark); }
+
+  .btn-full-outline {
+    display: block; text-align: center;
+    border: 1.5px solid var(--border); color: var(--text);
+    padding: 0.9rem; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 500; text-decoration: none;
+    transition: border-color 0.2s; font-family: var(--sans);
+  }
+  .btn-full-outline:hover { border-color: var(--green); color: var(--green); }
+
+  /* FAQ */
+  .faq { background: var(--bg); }
+  .faq-header { max-width: 600px; margin-bottom: 3rem; }
+
+  .faq-list { max-width: 700px; display: flex; flex-direction: column; gap: 1px; }
+
+  .faq-item {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; margin-bottom: 0.75rem;
+  }
+
+  .faq-q {
+    width: 100%; text-align: left; padding: 1.2rem 1.5rem;
+    background: none; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.95rem; font-weight: 500; color: var(--text);
+    font-family: var(--sans); transition: color 0.2s;
+  }
+  .faq-q:hover { color: var(--green); }
+
+  .faq-icon { font-size: 1.2rem; color: var(--text-muted); transition: transform 0.2s; font-weight: 300; }
+  .faq-item.open .faq-icon { transform: rotate(45deg); }
+
+  .faq-a {
+    display: none; padding: 0 1.5rem 1.2rem;
+    font-size: 0.9rem; color: var(--text-muted); line-height: 1.7; font-weight: 300;
+  }
+  .faq-item.open .faq-a { display: block; }
+
+  /* CTA FINAL */
+  .cta-final {
+    background: var(--green-dark);
+    text-align: center; padding: 7rem 6%;
+  }
+
+  .cta-final h2 {
+    font-family: var(--serif); font-size: clamp(2rem, 4vw, 3rem);
+    color: white; font-weight: 400; line-height: 1.2; margin-bottom: 1.2rem;
+  }
+  .cta-final h2 em { font-style: italic; color: #5DCAA5; }
+  .cta-final p { font-size: 1.05rem; color: rgba(255,255,255,0.65); margin-bottom: 2.5rem; font-weight: 300; }
+
+  .btn-wa {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: #25D366; color: white;
+    padding: 1rem 2.5rem; border-radius: 12px;
+    font-size: 1.05rem; font-weight: 500; text-decoration: none;
+    transition: transform 0.2s, background 0.2s; font-family: var(--sans);
+  }
+  .btn-wa:hover { background: #1ebe5a; transform: translateY(-2px); }
+  .btn-wa svg { width: 22px; height: 22px; fill: white; }
+
+  /* FOOTER */
+  footer {
+    background: var(--text); color: rgba(255,255,255,0.5);
+    padding: 2.5rem 6%; display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  footer a { color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.85rem; }
+  footer a:hover { color: #5DCAA5; }
+  .footer-brand { font-size: 0.9rem; font-weight: 500; color: rgba(255,255,255,0.8); }
+  .footer-links { display: flex; gap: 2rem; }
+
+  @media (max-width: 900px) {
+    .hero-visual { display: none; }
+    .steps { grid-template-columns: 1fr; }
+    .steps::before { display: none; }
+    nav .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+    </div>
+    SmartMoney AI
+  </a>
+  <ul class="nav-links">
+    <li><a href="#cara-pakai">Cara Pakai</a></li>
+    <li><a href="#fitur">Fitur</a></li>
+    <li><a href="#harga">Harga</a></li>
+    <li><a href="#faq">FAQ</a></li>
+  </ul>
+  <a href="https://wa.me/628519088915" class="btn-nav" target="_blank">Coba Gratis</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span class="badge-dot"></span>
+      Asisten keuangan berbasis AI
+    </div>
+    <h1>Catat keuanganmu<br>langsung dari <em>WhatsApp</em></h1>
+    <p>Tidak perlu install aplikasi. Cukup chat, SmartMoney AI otomatis mencatat, menganalisis, dan memberi insight keuangan harianmu.</p>
+    <div class="hero-cta">
+      <a href="https://wa.me/628519088915" class="btn-primary" target="_blank">
+        <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        Mulai Gratis Sekarang
+      </a>
+      <a href="#cara-pakai" class="btn-ghost">Lihat cara kerjanya</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-item">
+        <span class="stat-num">3 detik</span>
+        <span class="stat-label">rata-rata waktu catat</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num">100%</span>
+        <span class="stat-label">berbasis WhatsApp</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num">Gratis</span>
+        <span class="stat-label">untuk memulai</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phone mockup -->
+  <div class="hero-visual">
+    <div class="phone">
+      <div class="phone-inner">
+        <div class="phone-bar">
+          <div class="wa-avatar">SM</div>
+          <div>
+            <div class="wa-name">SmartMoney AI</div>
+            <div class="wa-status">online</div>
+          </div>
+        </div>
+        <div class="chat-body">
+          <div class="msg msg-user">makan siang 35rb<div class="msg-time">12:01</div></div>
+          <div class="msg msg-bot">
+            💸 <strong>Pengeluaran dicatat!</strong><br><br>
+            📝 Makan siang<br>
+            🏷️ Makanan & Minuman<br>
+            💵 Rp 35.000<br>
+            🔥 Streak: 5 hari<br><br>
+            💡 <em>Pengeluaran makan siangmu minggu ini Rp 175rb. Cukup terkontrol!</em>
+            <div class="msg-time">12:01</div>
+          </div>
+          <div class="msg msg-user">saldo<div class="msg-time">12:03</div></div>
+          <div class="msg msg-bot">
+            💰 <strong>Ringkasan Keuangan</strong><br><br>
+            📈 Pemasukan: Rp 8.500.000<br>
+            📉 Pengeluaran: Rp 3.240.000<br>
+            💵 Saldo: Rp 5.260.000
+            <div class="msg-time">12:03</div>
+          </div>
+          <div class="msg msg-user">budget makan 600rb<div class="msg-time">12:05</div></div>
+          <div class="msg msg-bot">
+            ✅ <strong>Budget diset!</strong><br><br>
+            🏷️ Kategori: makan<br>
+            💵 Budget: Rp 600.000/bulan
+            <div class="msg-time">12:05</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLEM -->
+<section class="problem">
+  <p class="section-label">Masalah yang kami selesaikan</p>
+  <h2 class="section-title">Kenapa keuanganmu <em>selalu berantakan?</em></h2>
+  <p class="section-sub">Bukan karena kamu tidak disiplin. Tapi karena cara mencatatnya terlalu ribet.</p>
+  <div class="pain-grid">
+    <div class="pain-item">
+      <div class="pain-icon">📱</div>
+      <h3>Aplikasi terlalu rumit</h3>
+      <p>Butuh buka app, cari kategori, isi form — sudah malas duluan sebelum sempat catat.</p>
+    </div>
+    <div class="pain-item">
+      <div class="pain-icon">📊</div>
+      <h3>Excel terlalu manual</h3>
+      <p>Spreadsheet tidak praktis dipakai di hp, apalagi saat sedang di luar rumah.</p>
+    </div>
+    <div class="pain-item">
+      <div class="pain-icon">🤷</div>
+      <h3>Tidak tau uang habis kemana</h3>
+      <p>Akhir bulan selalu heran, padahal merasa tidak beli apa-apa yang mahal.</p>
+    </div>
+    <div class="pain-item">
+      <div class="pain-icon">😮‍💨</div>
+      <h3>Susah konsisten</h3>
+      <p>Seminggu semangat, minggu berikutnya sudah lupa. Pola ini terus berulang.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="cara-pakai">
+  <p class="section-label">Cara pakai</p>
+  <h2 class="section-title">Semudah kirim <em>pesan WhatsApp</em></h2>
+  <p class="section-sub">Tidak perlu install apapun. Langsung chat dan mulai catat dalam hitungan detik.</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3>Simpan nomor bot</h3>
+      <p>Simpan nomor SmartMoney AI di kontakmu, lalu kirim pesan pertama untuk memulai.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3>Chat seperti biasa</h3>
+      <p>Ketik transaksimu dalam bahasa natural. "Makan siang 35rb" atau "gajian 5 juta".</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3>Lihat insight otomatis</h3>
+      <p>AI langsung catat, kategorikan, dan berikan insight keuangan yang personal untukmu.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="fitur">
+  <div class="features-header">
+    <p class="section-label">Fitur unggulan</p>
+    <h2 class="section-title">Semua yang kamu butuhkan <em>ada di sini</em></h2>
+    <p class="section-sub">Dirancang khusus untuk kebiasaan keuangan orang Indonesia.</p>
+  </div>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="feat-icon">🧠</div>
+      <h3>AI Parsing Cerdas</h3>
+      <p>Tulis transaksi dengan bahasa sehari-hari. "Gopay bensin 50rb", "bayar listrik 200k" — AI langsung paham.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">📈</div>
+      <h3>Laporan Otomatis</h3>
+      <p>Ketik "bulan ini" atau "minggu ini" untuk mendapat ringkasan pengeluaran lengkap beserta kategorinya.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">🎯</div>
+      <h3>Budget & Alert</h3>
+      <p>Set batas pengeluaran per kategori. Bot otomatis mengingatkan jika hampir atau sudah melebihi budget.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">🔥</div>
+      <h3>Streak & Gamifikasi</h3>
+      <p>Kumpulkan streak harian dan raih badge untuk membangun kebiasaan mencatat yang konsisten.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">💡</div>
+      <h3>Insight Personal</h3>
+      <p>Setiap transaksi dianalisis AI untuk memberi insight relevan berdasarkan pola pengeluaranmu.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">⚡</div>
+      <h3>Selalu Online 24/7</h3>
+      <p>Bot berjalan di server cloud sepanjang waktu. Catat kapanpun kamu mau, bahkan tengah malam.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing" id="harga">
+  <div class="pricing-header">
+    <p class="section-label">Harga</p>
+    <h2 class="section-title">Mulai <em>gratis,</em> upgrade kapanpun</h2>
+    <p class="section-sub">Tidak ada kartu kredit yang dibutuhkan untuk memulai.</p>
+  </div>
+  <div class="pricing-grid">
+    <div class="price-card">
+      <p class="price-name">Gratis</p>
+      <p class="price-amount">Rp 0</p>
+      <p class="price-period">selamanya</p>
+      <ul class="price-features">
+        <li>Catat transaksi tak terbatas</li>
+        <li>Laporan harian & mingguan</li>
+        <li>AI parsing bahasa natural</li>
+        <li>Streak & badge dasar</li>
+        <li>Insight otomatis</li>
+      </ul>
+      <a href="https://wa.me/628519088915" class="btn-full-outline" target="_blank">Mulai Gratis</a>
+    </div>
+    <div class="price-card featured">
+      <div class="price-badge">Segera Hadir</div>
+      <p class="price-name">Premium</p>
+      <p class="price-amount">Rp 29k</p>
+      <p class="price-period">per bulan</p>
+      <ul class="price-features">
+        <li>Semua fitur Gratis</li>
+        <li>Laporan PDF bulanan</li>
+        <li>Multiple wallet</li>
+        <li>Export data Excel</li>
+        <li>Analisis AI mendalam</li>
+        <li>Prioritas support</li>
+      </ul>
+      <a href="https://wa.me/628519088915" class="btn-full" target="_blank">Daftar Waitlist</a>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="faq" id="faq">
+  <div class="faq-header">
+    <p class="section-label">FAQ</p>
+    <h2 class="section-title">Pertanyaan yang <em>sering ditanya</em></h2>
+  </div>
+  <div class="faq-list">
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFaq(this)">
+        Apakah saya perlu install aplikasi khusus?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a">Tidak sama sekali. SmartMoney AI berjalan 100% di WhatsApp yang sudah ada di hp kamu. Cukup simpan nomor botnya dan langsung mulai chat.</div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFaq(this)">
+        Apakah data keuangan saya aman?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a">Data kamu disimpan di database yang terenkripsi dan tidak dibagikan kepada siapapun. Hanya kamu yang bisa mengakses data keuanganmu sendiri.</div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFaq(this)">
+        Bagaimana cara mencatat transaksi?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a">Cukup ketik dengan bahasa natural seperti biasa kamu ngobrol. Contoh: "makan siang 35rb", "gajian 5 juta", "bayar grabcar 25k". AI akan otomatis memproses dan mengkategorikan transaksimu.</div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFaq(this)">
+        Apakah bisa dipakai untuk lebih dari satu orang?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a">Ya! Setiap nomor WhatsApp memiliki data yang terpisah. Jadi pasangan atau anggota keluarga kamu bisa menggunakan bot yang sama dengan data masing-masing yang independen.</div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFaq(this)">
+        Apa saja perintah yang bisa digunakan?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a">Ketik "bantuan" di chat untuk melihat semua perintah tersedia, termasuk: saldo, riwayat, hari ini, minggu ini, bulan ini, budget, profil, dan masih banyak lagi.</div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-final">
+  <h2>Mulai kontrol keuanganmu<br><em>hari ini, gratis</em></h2>
+  <p>Bergabung dan rasakan bedanya punya asisten keuangan AI di genggamanmu.</p>
+  <a href="https://wa.me/628519088915" class="btn-wa" target="_blank">
+    <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+    Chat di WhatsApp Sekarang
+  </a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <span class="footer-brand">SmartMoney AI</span>
+  <div class="footer-links">
+    <a href="/privacy">Kebijakan Privasi</a>
+    <a href="https://wa.me/628519088915" target="_blank">Kontak</a>
+  </div>
+  <span style="font-size: 0.82rem;">© 2026 SmartMoney AI</span>
+</footer>
+
+<script>
+function toggleFaq(btn) {
+  const item = btn.parentElement;
+  item.classList.toggle('open');
+}
+</script>
+
+</body>
+</html>
