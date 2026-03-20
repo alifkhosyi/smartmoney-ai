@@ -96,3 +96,31 @@ export async function sendList(
   })
   return response.json()
 }
+
+export async function sendImage(to: string, imageBuffer: Buffer, caption: string) {
+  const mediaUrl = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/media`
+  const formData = new FormData()
+  const blob = new Blob([imageBuffer], { type: 'image/png' })
+  formData.append('file', blob, 'share.png')
+  formData.append('type', 'image/png')
+  formData.append('messaging_product', 'whatsapp')
+  const uploadRes = await fetch(mediaUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WHATSAPP_API_TOKEN}` },
+    body: formData
+  })
+  const uploadData = await uploadRes.json()
+  const mediaId = uploadData.id
+  if (!mediaId) throw new Error('Gagal upload media ke WA')
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'image',
+      image: { id: mediaId, caption }
+    })
+  })
+  return response.json()
+}
