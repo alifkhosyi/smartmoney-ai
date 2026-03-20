@@ -9,6 +9,9 @@ import { downloadWAMedia } from '../services/whatsapp/media.js'
 import { parseReceiptImage } from '../services/ai/ocr.js'
 import { checkOcrLimit, checkBudgetLimit, getUpsellMessage, PLAN_NAMES } from '../services/planLimits.js'
 import { addXp, formatXpMessage, checkDailyBonus, updateWeeklyChallenge, initWeeklyChallenges } from '../services/xp.js'
+import { generateShareCard } from '../services/shareCard.js'
+import { sendImage } from '../services/whatsapp/client.js'
+import * as fs from 'fs'
 
 const webhook = new Hono()
 
@@ -373,10 +376,61 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: share ──
+      if (cmd === 'share' || cmd === 'bagikan') {
+        const plan = user.plan || 'free'
+        if (plan === 'free') {
+          await sendMessage(from, getUpsellMessage('export', 'free'))
+          return c.json({ status: 'ok' })
+        }
+
+        try {
+          await sendMessage(from, '🎨 Sedang generate kartu share kamu... tunggu sebentar!')
+
+          // Ambil data untuk share card
+          const now = new Date()
+          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+          const { data: txThisMonth } = await supabase
+            .from('transactions').select('*')
+            .eq('user_id', user.id)
+            .gte('created_at', firstDay.toISOString())
+
+          const income = txThisMonth?.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0) || 0
+          const expense = txThisMonth?.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0) || 0
+          const saved = income - expense
+
+          const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
+
+          const imgPath = await generateShareCard({
+            type: 'monthly_save',
+            name: user.name || 'Sobat',
+            value: saved > 0 ? saved : expense,
+            month: months[now.getMonth()],
+          })
+
+          const imgBuffer = fs.readFileSync(imgPath)
+          fs.unlinkSync(imgPath)
+
+          await sendImage(from, imgBuffer,
+            `📊 Laporan ${months[now.getMonth()]} ${now.getFullYear()} ku!
+
+Dibuat dengan SmartMoney AI 🤖
+Coba gratis via WhatsApp!`
+          )
+
+          const xpShareResult = await addXp(user.id, 'transaction', 5)
+          await sendMessage(from, `✅ Kartu share berhasil dikirim!\n\nSimpan dan share ke story WA, IG, atau Facebook kamu ya! 📸${formatXpMessage(xpShareResult)}`)
+        } catch (err) {
+          console.error('[Share] Error:', err)
+          await sendMessage(from, '😅 Gagal generate kartu. Coba lagi ya!')
+        }
+        return c.json({ status: 'ok' })
+      }
+
       // ── Command: bantuan ──
       if (cmd === 'bantuan' || cmd === 'help') {
         const premiumInfo = user.is_premium ? '\n⭐ *Status: Premium*' : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
-        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Foto Struk:*\n- Kirim foto struk/nota → otomatis terbaca 📸\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Edit & Hapus:*\n- *hapus terakhir* — hapus transaksi terakhir\n- *hapus* — pilih transaksi untuk dihapus\n- *edit 50rb* — edit nominal transaksi terakhir\n- *edit* — pilih transaksi untuk diedit\n\n*Set Budget:*\n- "budget makan 500rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Foto Struk:*\n- Kirim foto struk/nota → otomatis terbaca 📸\n\n*Share & Pamer:*\n- *share* — generate kartu laporan untuk story WA/IG/FB 📸\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Edit & Hapus:*\n- *hapus terakhir* — hapus transaksi terakhir\n- *hapus* — pilih transaksi untuk dihapus\n- *edit 50rb* — edit nominal transaksi terakhir\n- *edit* — pilih transaksi untuk diedit\n\n*Set Budget:*\n- "budget makan 500rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
         return c.json({ status: 'ok' })
       }
 
