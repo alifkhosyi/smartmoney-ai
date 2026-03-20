@@ -17,7 +17,8 @@ export async function createPaymentLink(
   phone: string,
   plan: 'premium'
 ): Promise<string> {
-  const orderId = `smartmoney-${userId}-${Date.now()}`
+  const shortId = userId.replace(/-/g, '').substring(0, 12)
+  const orderId = `sm-${shortId}-${Date.now().toString().slice(-8)}`
   const parameter = {
     transaction_details: { order_id: orderId, gross_amount: 29000 },
     customer_details: { phone: phone },
