@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
 import { handleOnboarding, isOnboarding } from '../services/onboarding.js'
+import { downloadWAMedia } from '../services/whatsapp/media.js'
+import { parseReceiptImage } from '../services/ai/ocr.js'
 
 const webhook = new Hono()
 
@@ -66,7 +68,7 @@ webhook.post('/webhook', async (c) => {
       text = message?.text?.body?.trim() || ''
     }
 
-    console.log(`Message from ${from}: ${text} (buttonId: ${buttonId})`)
+    console.log(`Message from ${from}: ${text} (buttonId: ${buttonId}, type: ${msgType})`)
     markAsRead(message.id).catch(() => {})
 
     try {
@@ -84,9 +86,92 @@ webhook.post('/webhook', async (c) => {
         if (handled) return c.json({ status: 'ok' })
       }
 
-      // ── Handle pending action (konfirmasi hapus/edit) ──
+      // ── Handle image: OCR struk ──
+      if (msgType === 'image') {
+        const mediaId = message.image?.id
+        const caption = message.image?.caption || ''
+
+        await sendMessage(from, '📸 Struk diterima! Sedang dianalisis... tunggu sebentar ya 🔍')
+
+        try {
+          const { base64, mimeType } = await downloadWAMedia(mediaId)
+          const result = await parseReceiptImage(base64, mimeType)
+
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          const itemList = result.items.length > 0
+            ? result.items.map((i) => `  • ${i.name}: Rp ${fmt(i.price)}`).join('\n')
+            : '  (item tidak terbaca)'
+
+          const merchantText = result.merchant ? `🏪 *${result.merchant}*\n` : ''
+          const dateText = result.date ? `📅 ${result.date}\n` : ''
+          const confidenceEmoji = result.confidence === 'high' ? '✅' : result.confidence === 'medium' ? '⚠️' : '❓'
+
+          const confirmMsg =
+            `${confidenceEmoji} *Hasil Scan Struk*\n\n` +
+            `${merchantText}${dateText}` +
+            `📦 *Item:*\n${itemList}\n\n` +
+            `💰 *Total: Rp ${fmt(result.total)}*\n` +
+            `🏷️ Kategori: ${result.category}\n\n` +
+            `Simpan transaksi ini?`
+
+          await supabase.from('users').update({
+            pending_action: {
+              type: 'confirm_ocr',
+              amount: result.total,
+              category: result.category,
+              merchant: result.merchant,
+              date: result.date,
+              note: caption || result.merchant || 'Belanja struk',
+            }
+          }).eq('phone', from)
+
+          await sendButtons(from, confirmMsg, [
+            { id: 'ocr_confirm_yes', title: '✅ Ya, Simpan' },
+            { id: 'ocr_confirm_no', title: '❌ Batalkan' }
+          ])
+        } catch (err: any) {
+          console.error('[OCR] Error:', err.message)
+          if (err.message === 'Bukan struk belanja') {
+            await sendMessage(from, '🤔 Gambar ini sepertinya bukan struk belanja.\n\nKirim foto nota/struk yang jelas ya!')
+          } else {
+            await sendMessage(from, '😅 Struk sulit dibaca.\n\nCoba foto ulang dengan:\n• Pencahayaan lebih terang\n• Posisi kamera lurus\n• Seluruh struk terlihat')
+          }
+        }
+        return c.json({ status: 'ok' })
+      }
+
+      // ── Handle pending action (konfirmasi hapus/edit/ocr) ──
       if (user.pending_action) {
         const action = user.pending_action as any
+
+        // Konfirmasi simpan OCR
+        if (action.type === 'confirm_ocr' && buttonId === 'ocr_confirm_yes') {
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          await supabase.from('transactions').insert({
+            user_id: user.id,
+            amount: action.amount,
+            type: 'expense',
+            category: action.category,
+            description: action.note,
+            date: action.date || new Date().toISOString().split('T')[0],
+          })
+          await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+          await sendMessage(from,
+            `✅ *Transaksi tersimpan!*\n\n` +
+            `💸 Rp ${fmt(action.amount)}\n` +
+            `🏷️ ${action.category}\n` +
+            `📝 ${action.note}\n\n` +
+            `Saldo kamu sudah diupdate 🎯`
+          )
+          return c.json({ status: 'ok' })
+        }
+
+        // Batalkan OCR
+        if (action.type === 'confirm_ocr' && buttonId === 'ocr_confirm_no') {
+          await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+          await sendMessage(from, '❌ Oke, transaksi dibatalkan.')
+          return c.json({ status: 'ok' })
+        }
 
         // Konfirmasi hapus
         if (action.type === 'confirm_delete' && (buttonId === 'confirm_yes' || buttonId?.startsWith('del_'))) {
@@ -263,7 +348,7 @@ webhook.post('/webhook', async (c) => {
       // ── Command: bantuan ──
       if (cmd === 'bantuan' || cmd === 'help') {
         const premiumInfo = user.is_premium ? '\n⭐ *Status: Premium*' : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
-        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Edit & Hapus:*\n- *hapus terakhir* — hapus transaksi terakhir\n- *hapus* — pilih transaksi untuk dihapus\n- *edit 50rb* — edit nominal transaksi terakhir\n- *edit* — pilih transaksi untuk diedit\n\n*Set Budget:*\n- "budget makan 500rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Foto Struk:*\n- Kirim foto struk/nota → otomatis terbaca 📸\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Edit & Hapus:*\n- *hapus terakhir* — hapus transaksi terakhir\n- *hapus* — pilih transaksi untuk dihapus\n- *edit 50rb* — edit nominal transaksi terakhir\n- *edit* — pilih transaksi untuk diedit\n\n*Set Budget:*\n- "budget makan 500rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
         return c.json({ status: 'ok' })
       }
 
