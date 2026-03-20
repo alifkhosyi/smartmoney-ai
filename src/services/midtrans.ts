@@ -12,19 +12,41 @@ const core = new midtransClient.CoreApi({
   clientKey: process.env.MIDTRANS_CLIENT_KEY || ''
 })
 
+const PLAN_CONFIG = {
+  personal: {
+    price: 29000,
+    name: 'SmartMoney AI Personal ⭐ - 1 Bulan',
+    id: 'personal-monthly'
+  },
+  business: {
+    price: 49000,
+    name: 'SmartMoney AI Business 👑 - 1 Bulan',
+    id: 'business-monthly'
+  },
+  // backward compat
+  premium: {
+    price: 29000,
+    name: 'SmartMoney AI Personal ⭐ - 1 Bulan',
+    id: 'personal-monthly'
+  }
+}
+
 export async function createPaymentLink(
   userId: string,
   phone: string,
-  plan: 'premium'
+  plan: 'personal' | 'business' | 'premium'
 ): Promise<string> {
+  const config = PLAN_CONFIG[plan]
   const shortId = userId.replace(/-/g, '').substring(0, 12)
-  const orderId = `sm-${shortId}-${Date.now().toString().slice(-8)}`
+  const orderId = `sm-${shortId}-${plan.charAt(0)}-${Date.now().toString().slice(-8)}`
+
   const parameter = {
-    transaction_details: { order_id: orderId, gross_amount: 29000 },
+    transaction_details: { order_id: orderId, gross_amount: config.price },
     customer_details: { phone: phone },
-    item_details: [{ id: 'premium-monthly', price: 29000, quantity: 1, name: 'SmartMoney AI Premium - 1 Bulan' }],
+    item_details: [{ id: config.id, price: config.price, quantity: 1, name: config.name }],
     callbacks: { finish: 'https://smartmoney-ai-landing.vercel.app' }
   }
+
   const transaction = await snap.createTransaction(parameter)
   return transaction.redirect_url
 }

@@ -7,6 +7,7 @@ import { createPaymentLink } from '../services/midtrans.js'
 import { handleOnboarding, isOnboarding } from '../services/onboarding.js'
 import { downloadWAMedia } from '../services/whatsapp/media.js'
 import { parseReceiptImage } from '../services/ai/ocr.js'
+import { checkOcrLimit, checkBudgetLimit, getUpsellMessage, PLAN_NAMES } from '../services/planLimits.js'
 
 const webhook = new Hono()
 
@@ -30,12 +31,25 @@ webhook.post('/payment-notification', async (c) => {
     if (fraudStatus === 'accept' || transactionStatus === 'settlement') {
       const parts = orderId.split('-')
       const userId = parts[1]
+      const planCode = parts[2] // 'p' = personal, 'b' = business
+      const plan = planCode === 'b' ? 'business' : 'personal'
+      const planName = plan === 'business' ? 'Business 👑' : 'Personal ⭐'
+      const planEmoji = plan === 'business' ? '👑' : '⭐'
       if (userId) {
         const premiumUntil = new Date()
         premiumUntil.setMonth(premiumUntil.getMonth() + 1)
-        await supabase.from('users').update({ is_premium: true, premium_until: premiumUntil.toISOString() }).eq('id', userId)
+        await supabase.from('users').update({
+          is_premium: true,
+          plan: plan,
+          premium_until: premiumUntil.toISOString()
+        }).eq('id', userId)
         const { data: user } = await supabase.from('users').select('phone').eq('id', userId).single()
-        if (user) await sendMessage(user.phone, `🌟 *Selamat! Kamu sekarang Premium!*\n\n✅ Akses semua fitur premium aktif\n📅 Berlaku hingga: ${premiumUntil.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\nTerima kasih sudah upgrade! 🎉`)
+        if (user) await sendMessage(user.phone,
+          `${planEmoji} *Selamat! Kamu sekarang ${planName}!*\n\n` +
+          `✅ Semua fitur ${planName} aktif\n` +
+          `📅 Berlaku hingga: ${premiumUntil.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\n` +
+          `Terima kasih sudah upgrade SmartMoney AI! 🎉\n\nKetik *bantuan* untuk lihat semua fitur kamu.`
+        )
       }
     }
   }
@@ -96,7 +110,15 @@ webhook.post('/webhook', async (c) => {
         const mediaId = message.image?.id
         const caption = message.image?.caption || ''
 
-        await sendMessage(from, '📸 Struk diterima! Sedang dianalisis... tunggu sebentar ya 🔍')
+        // Cek limit OCR
+      const plan = (user.plan || 'free') as 'free' | 'personal' | 'business'
+      const ocrCheck = await checkOcrLimit(user.id, plan)
+      if (!ocrCheck.allowed) {
+        await sendMessage(from, getUpsellMessage('ocr', plan))
+        return c.json({ status: 'ok' })
+      }
+
+      await sendMessage(from, '📸 Struk diterima! Sedang dianalisis... tunggu sebentar ya 🔍')
 
         try {
           const { base64, mimeType } = await downloadWAMedia(mediaId)
@@ -359,13 +381,38 @@ webhook.post('/webhook', async (c) => {
 
       // ── Command: upgrade ──
       if (cmd === 'upgrade' || cmd === 'premium' || cmd === 'bayar') {
-        if (user.is_premium) {
-          const until = new Date(user.premium_until)
-          await sendMessage(from, `⭐ *Kamu sudah Premium!*\n\nAktif hingga: ${until.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`)
+        const plan = user.plan || 'free'
+
+        if (plan === 'business') {
+          await sendMessage(from, `👑 *Kamu sudah di plan Business!*\n\nKamu sudah menikmati semua fitur terbaik SmartMoney AI. Terima kasih! 🎉`)
           return c.json({ status: 'ok' })
         }
-        const paymentUrl = await createPaymentLink(user.id, from, 'premium')
-        await sendMessage(from, `🌟 *Upgrade ke SmartMoney AI Premium!*\n\nDapatkan fitur eksklusif:\n✅ Laporan PDF bulanan\n✅ Analisis AI mendalam\n✅ Export data Excel\n✅ Prioritas support\n\n💵 Hanya *Rp 29.000/bulan*\n\n👇 *Bayar sekarang:*\n${paymentUrl}\n\n_Link berlaku 24 jam. Setelah bayar, fitur langsung aktif otomatis._`)
+
+        if (plan === 'personal') {
+          const until = new Date(user.premium_until)
+          const personalUrl = await createPaymentLink(user.id, from, 'business')
+          await sendMessage(from,
+            `⭐ *Kamu sudah Personal!*\n\nAktif hingga: ${until.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\n` +
+            `👑 *Upgrade ke Business — ~~Rp 99.000~~ Rp 49.000/bulan*\n` +
+            `✅ Export Excel\n✅ Laporan pajak\n✅ Goals unlimited\n✅ Streak freeze 3x\n✅ Komisi referral 30%\n\n` +
+            `👇 Bayar sekarang:\n${personalUrl}\n\n_Link berlaku 24 jam._`
+          )
+          return c.json({ status: 'ok' })
+        }
+
+        // User gratis — tampilkan 2 pilihan
+        const personalUrl = await createPaymentLink(user.id, from, 'personal')
+        const businessUrl = await createPaymentLink(user.id, from, 'business')
+        await sendMessage(from,
+          `🚀 *Upgrade SmartMoney AI*\n\n` +
+          `⭐ *Personal — Rp 29.000/bulan*\n` +
+          `✅ Riwayat unlimited\n✅ OCR struk unlimited\n✅ Budget unlimited\n✅ 3 Goals nabung\n✅ Laporan PDF\n✅ Streak freeze 1x\n✅ Komisi referral 20%\n` +
+          `👉 ${personalUrl}\n\n` +
+          `👑 *Business — ~~Rp 99.000~~ Rp 49.000/bulan*\n` +
+          `✅ Semua fitur Personal\n✅ Export Excel\n✅ Laporan pajak\n✅ Goals unlimited\n✅ Streak freeze 3x\n✅ Komisi referral 30%\n` +
+          `👉 ${businessUrl}\n\n` +
+          `_Link berlaku 24 jam. Fitur aktif otomatis setelah bayar!_ 🎉`
+        )
         return c.json({ status: 'ok' })
       }
 
@@ -473,6 +520,12 @@ webhook.post('/webhook', async (c) => {
         else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
         else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
         if (amount > 0) {
+          const budgetPlan = (user.plan || 'free') as 'free' | 'personal' | 'business'
+          const budgetCheck = await checkBudgetLimit(user.id, budgetPlan)
+          if (!budgetCheck.allowed) {
+            await sendMessage(from, getUpsellMessage('budget', budgetPlan))
+            return c.json({ status: 'ok' })
+          }
           await supabase.from('budgets').upsert({ user_id: user.id, category, amount, period: 'monthly' }, { onConflict: 'user_id,category,period' })
           const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
           await sendMessage(from, `✅ *Budget diset!*\n\n🏷️ Kategori: ${category}\n💵 Budget: Rp ${fmt(amount)}/bulan`)
