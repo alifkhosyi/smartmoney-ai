@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { sendMessage } from '../services/whatsapp/client.js'
+import { sendMessage, markAsRead } from '../services/whatsapp/client.js'
 import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
@@ -80,6 +80,7 @@ webhook.post('/webhook', async (c) => {
     const text = message?.text?.body?.trim()
 
     console.log(`Message from ${from}: ${text}`)
+    markAsRead(message.id).catch(() => {})
 
     try {
       let { data: user } = await supabase
