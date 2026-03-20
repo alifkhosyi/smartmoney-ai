@@ -3,6 +3,8 @@ import { Hono } from 'hono'
 import { config } from 'dotenv'
 import webhook from './routes/webhook.js'
 import { supabase } from './lib/supabase.js'
+import { startReminderCron } from './services/reminder.js'
+import { startWeeklyCron } from './services/weeklyReport.js'
 
 config()
 
@@ -31,12 +33,26 @@ app.get('/privacy', (c) => {
   `)
 })
 
+app.get('/admin/test-reminder', async (c) => {
+  const { sendReminders } = await import('./services/reminder.js')
+  await sendReminders()
+  return c.json({ success: true, message: 'Reminder terkirim!' })
+})
+
+app.get('/admin/test-weekly-report', async (c) => {
+  const { sendWeeklyReportToAll } = await import('./services/weeklyReport.js')
+  await sendWeeklyReportToAll()
+  return c.json({ success: true, message: 'Laporan mingguan terkirim!' })
+})
+
 app.route('/', webhook)
 
 const port = Number(process.env.PORT) || 3000
 
 serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
   console.log(`SmartMoney AI running on port ${port}`)
+  startReminderCron()
+  startWeeklyCron()
 })
 
 export default app
