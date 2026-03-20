@@ -8,6 +8,7 @@ import { handleOnboarding, isOnboarding } from '../services/onboarding.js'
 import { downloadWAMedia } from '../services/whatsapp/media.js'
 import { parseReceiptImage } from '../services/ai/ocr.js'
 import { checkOcrLimit, checkBudgetLimit, getUpsellMessage, PLAN_NAMES } from '../services/planLimits.js'
+import { addXp, formatXpMessage, checkDailyBonus, updateWeeklyChallenge, initWeeklyChallenges } from '../services/xp.js'
 
 const webhook = new Hono()
 
@@ -506,7 +507,14 @@ webhook.post('/webhook', async (c) => {
         const streakEmoji = profile.streak >= 7 ? '🔥' : profile.streak >= 3 ? '⚡' : '✨'
         const name = user.name ? `*${user.name}*\n` : ''
         const premiumStatus = user.is_premium ? '\n⭐ Status: *Premium*' : '\n💎 Status: Gratis — ketik *upgrade* untuk premium'
-        await sendMessage(from, `👤 *Profil Kamu*\n\n${name}${streakEmoji} Streak: ${profile.streak} hari\n🏆 Terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}${premiumStatus}\n\n*Badge:*\n${badgeList}`)
+        const userXp = user.xp || 0
+        const userLevel = user.level || 1
+        const { getLevelFromXp } = await import('../services/xp.js')
+        const { current: levelData, nextLevel: nextLvl, xpToNext } = getLevelFromXp(userXp)
+        const xpBar = nextLvl
+          ? `\n⚡ *XP: ${userXp}* | ${levelData.name}\n📊 ${xpToNext} XP lagi ke ${nextLvl.name}`
+          : `\n⚡ *XP: ${userXp}* | ${levelData.name} (MAX!)`
+        await sendMessage(from, `👤 *Profil Kamu*\n\n${name}${streakEmoji} Streak: ${profile.streak} hari\n🏆 Terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}${xpBar}${premiumStatus}\n\n*Badge:*\n${badgeList}`)
         return c.json({ status: 'ok' })
       }
 
@@ -546,6 +554,17 @@ webhook.post('/webhook', async (c) => {
 
       await supabase.from('transactions').insert({ user_id: user.id, type: parsed.type, amount: parsed.amount, category: parsed.category, description: parsed.description })
 
+      // XP untuk transaksi
+      const xpResult = await addXp(user.id, 'transaction')
+      const dailyBonus = await checkDailyBonus(user.id)
+      let bonusXpResult = null
+      if (dailyBonus) bonusXpResult = await addXp(user.id, 'transaction_bonus_3x')
+
+      // Update weekly challenge transaksi
+      await updateWeeklyChallenge(user.id, 'transactions_5')
+      await updateWeeklyChallenge(user.id, 'daily_streak')
+      await initWeeklyChallenges(user.id)
+
       const { streak, newBadges } = await updateStreak(user.id)
 
       let budgetAlert = ''
@@ -568,7 +587,9 @@ webhook.post('/webhook', async (c) => {
       const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [])
       const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
-      await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}`)
+      const xpText = formatXpMessage(xpResult)
+      const bonusXpText = bonusXpResult ? `\n🎯 *Bonus 3x transaksi hari ini!*${formatXpMessage(bonusXpResult)}` : ''
+      await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}${xpText}${bonusXpText}`)
 
     } catch (err) {
       console.error('Error:', err)
