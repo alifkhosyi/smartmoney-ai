@@ -100,7 +100,7 @@ export async function sendList(
 export async function sendImage(to: string, imageBuffer: Buffer, caption: string) {
   const mediaUrl = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/media`
   const formData = new FormData()
-  const blob = new Blob([imageBuffer], { type: 'image/png' })
+  const blob = new Blob([new Uint8Array(imageBuffer)], { type: 'image/png' })
   formData.append('file', blob, 'share.png')
   formData.append('type', 'image/png')
   formData.append('messaging_product', 'whatsapp')
