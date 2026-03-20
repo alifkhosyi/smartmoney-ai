@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { sendMessage, markAsRead } from '../services/whatsapp/client.js'
+import { sendMessage, markAsRead, sendButtons, sendList } from '../services/whatsapp/client.js'
 import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
@@ -24,7 +24,6 @@ webhook.post('/payment-notification', async (c) => {
   const orderId = body.order_id
   const transactionStatus = body.transaction_status
   const fraudStatus = body.fraud_status
-
   if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
     if (fraudStatus === 'accept' || transactionStatus === 'settlement') {
       const parts = orderId.split('-')
@@ -34,9 +33,7 @@ webhook.post('/payment-notification', async (c) => {
         premiumUntil.setMonth(premiumUntil.getMonth() + 1)
         await supabase.from('users').update({ is_premium: true, premium_until: premiumUntil.toISOString() }).eq('id', userId)
         const { data: user } = await supabase.from('users').select('phone').eq('id', userId).single()
-        if (user) {
-          await sendMessage(user.phone, `🌟 *Selamat! Kamu sekarang Premium!*\n\n✅ Akses semua fitur premium aktif\n📅 Berlaku hingga: ${premiumUntil.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\nTerima kasih sudah upgrade! 🎉`)
-        }
+        if (user) await sendMessage(user.phone, `🌟 *Selamat! Kamu sekarang Premium!*\n\n✅ Akses semua fitur premium aktif\n📅 Berlaku hingga: ${premiumUntil.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n\nTerima kasih sudah upgrade! 🎉`)
       }
     }
   }
@@ -87,14 +84,190 @@ webhook.post('/webhook', async (c) => {
         if (handled) return c.json({ status: 'ok' })
       }
 
+      // ── Handle pending action (konfirmasi hapus/edit) ──
+      if (user.pending_action) {
+        const action = user.pending_action as any
+
+        // Konfirmasi hapus
+        if (action.type === 'confirm_delete' && (buttonId === 'confirm_yes' || buttonId?.startsWith('del_'))) {
+          const txId = buttonId === 'confirm_yes' ? action.tx_id : buttonId.replace('del_', '')
+          await supabase.from('transactions').delete().eq('id', txId).eq('user_id', user.id)
+          await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+          await sendMessage(from, '✅ *Transaksi berhasil dihapus!*\n\nKetik *riwayat* untuk lihat transaksi terbaru.')
+          return c.json({ status: 'ok' })
+        }
+
+        // Batalkan aksi
+        if (buttonId === 'confirm_no' || text.toLowerCase() === 'batal') {
+          await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+          await sendMessage(from, '↩️ Dibatalkan. Ada yang bisa aku bantu?')
+          return c.json({ status: 'ok' })
+        }
+
+        // Pilih transaksi dari list untuk dihapus
+        if (action.type === 'select_delete' && buttonId?.startsWith('del_')) {
+          const txId = buttonId.replace('del_', '')
+          const { data: tx } = await supabase.from('transactions').select('*').eq('id', txId).single()
+          if (tx) {
+            const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+            await supabase.from('users').update({ pending_action: { type: 'confirm_delete', tx_id: txId } }).eq('id', user.id)
+            await sendButtons(from,
+              `Hapus transaksi ini?\n\n${tx.type === 'income' ? '💰' : '💸'} *${tx.description}*\n🏷️ ${tx.category}\n💵 Rp ${fmt(tx.amount)}\n📅 ${new Date(tx.created_at).toLocaleDateString('id-ID')}`,
+              [
+                { id: 'confirm_yes', title: '🗑️ Ya, Hapus' },
+                { id: 'confirm_no', title: '↩️ Batal' }
+              ]
+            )
+          }
+          return c.json({ status: 'ok' })
+        }
+
+        // Edit nominal transaksi
+        if (action.type === 'confirm_edit') {
+          const amountStr = text.toLowerCase().trim()
+          let newAmount = 0
+          if (amountStr.includes('jt') || amountStr.includes('juta')) newAmount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
+          else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) newAmount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
+          else newAmount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
+
+          if (newAmount > 0) {
+            await supabase.from('transactions').update({ amount: newAmount }).eq('id', action.tx_id).eq('user_id', user.id)
+            await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+            const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+            await sendMessage(from, `✅ *Transaksi berhasil diupdate!*\n\nNominal baru: Rp ${fmt(newAmount)}\n\nKetik *riwayat* untuk lihat transaksi terbaru.`)
+          } else {
+            await sendMessage(from, 'Format nominal tidak valid. Coba ketik nominal baru, contoh: *35000* atau *35rb*')
+          }
+          return c.json({ status: 'ok' })
+        }
+
+        // Pilih transaksi dari list untuk diedit
+        if (action.type === 'select_edit' && buttonId?.startsWith('edit_')) {
+          const txId = buttonId.replace('edit_', '')
+          const { data: tx } = await supabase.from('transactions').select('*').eq('id', txId).single()
+          if (tx) {
+            const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+            await supabase.from('users').update({ pending_action: { type: 'confirm_edit', tx_id: txId } }).eq('id', user.id)
+            await sendMessage(from, `✏️ *Edit transaksi:*\n\n${tx.type === 'income' ? '💰' : '💸'} *${tx.description}*\n🏷️ ${tx.category}\n💵 Rp ${fmt(tx.amount)} (saat ini)\n\nKetik *nominal baru*, contoh: *50000* atau *50rb*`)
+          }
+          return c.json({ status: 'ok' })
+        }
+
+        // Clear pending action jika tidak ada yang cocok
+        await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+      }
+
       const cmd = text?.toLowerCase()
 
-      if (cmd === 'bantuan' || cmd === 'help') {
-        const premiumInfo = user.is_premium ? '\n⭐ *Status: Premium*' : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
-        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+      // ── Command: hapus ──
+      if (cmd === 'hapus' || cmd === 'hapus terakhir' || cmd === 'delete') {
+        const { data: transactions } = await supabase
+          .from('transactions').select('*').eq('user_id', user.id)
+          .order('created_at', { ascending: false }).limit(5)
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi yang bisa dihapus.')
+          return c.json({ status: 'ok' })
+        }
+
+        if (cmd === 'hapus terakhir') {
+          const tx = transactions[0]
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          await supabase.from('users').update({ pending_action: { type: 'confirm_delete', tx_id: tx.id } }).eq('id', user.id)
+          await sendButtons(from,
+            `Hapus transaksi terakhir ini?\n\n${tx.type === 'income' ? '💰' : '💸'} *${tx.description}*\n🏷️ ${tx.category}\n💵 Rp ${fmt(tx.amount)}\n📅 ${new Date(tx.created_at).toLocaleDateString('id-ID')}`,
+            [
+              { id: 'confirm_yes', title: '🗑️ Ya, Hapus' },
+              { id: 'confirm_no', title: '↩️ Batal' }
+            ]
+          )
+        } else {
+          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+          await supabase.from('users').update({ pending_action: { type: 'select_delete' } }).eq('id', user.id)
+          await sendList(from,
+            'Pilih transaksi yang ingin dihapus:',
+            'Pilih Transaksi',
+            [{
+              title: '5 Transaksi Terakhir',
+              rows: transactions.map(tx => ({
+                id: `del_${tx.id}`,
+                title: `${tx.type === 'income' ? '💰' : '💸'} ${tx.description}`,
+                description: `Rp ${fmt(tx.amount)} · ${new Date(tx.created_at).toLocaleDateString('id-ID')}`
+              }))
+            }],
+            '🗑️ Hapus Transaksi'
+          )
+        }
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: edit ──
+      if (cmd === 'edit' || cmd === 'edit terakhir' || cmd?.startsWith('edit ')) {
+        const { data: transactions } = await supabase
+          .from('transactions').select('*').eq('user_id', user.id)
+          .order('created_at', { ascending: false }).limit(5)
+
+        if (!transactions || transactions.length === 0) {
+          await sendMessage(from, 'Belum ada transaksi yang bisa diedit.')
+          return c.json({ status: 'ok' })
+        }
+
+        // Edit terakhir dengan nominal langsung: "edit 50rb"
+        if (cmd?.startsWith('edit ') && cmd !== 'edit terakhir') {
+          const amountStr = cmd.replace('edit ', '').trim()
+          let newAmount = 0
+          if (amountStr.includes('jt') || amountStr.includes('juta')) newAmount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
+          else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) newAmount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
+          else newAmount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
+
+          if (newAmount > 0) {
+            const tx = transactions[0]
+            const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+            await supabase.from('users').update({ pending_action: { type: 'confirm_delete', tx_id: tx.id } }).eq('id', user.id)
+            await sendButtons(from,
+              `Update transaksi terakhir?\n\n${tx.type === 'income' ? '💰' : '💸'} *${tx.description}*\n💵 Rp ${fmt(tx.amount)} → Rp ${fmt(newAmount)}`,
+              [
+                { id: 'confirm_yes', title: '✅ Ya, Update' },
+                { id: 'confirm_no', title: '↩️ Batal' }
+              ]
+            )
+            // Store proper edit action
+            await supabase.from('users').update({ pending_action: { type: 'confirm_edit', tx_id: tx.id, new_amount: newAmount, auto_confirm: true } }).eq('id', user.id)
+            // Auto process
+            await supabase.from('transactions').update({ amount: newAmount }).eq('id', tx.id).eq('user_id', user.id)
+            await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
+            await sendMessage(from, `✅ *Transaksi berhasil diupdate!*\n\n${tx.type === 'income' ? '💰' : '💸'} ${tx.description}\n💵 Rp ${fmt(tx.amount)} → *Rp ${fmt(newAmount)}*`)
+            return c.json({ status: 'ok' })
+          }
+        }
+
+        // Pilih dari list transaksi
+        const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        await supabase.from('users').update({ pending_action: { type: 'select_edit' } }).eq('id', user.id)
+        await sendList(from,
+          'Pilih transaksi yang ingin diedit nominalnya:',
+          'Pilih Transaksi',
+          [{
+            title: '5 Transaksi Terakhir',
+            rows: transactions.map(tx => ({
+              id: `edit_${tx.id}`,
+              title: `${tx.type === 'income' ? '💰' : '💸'} ${tx.description}`,
+              description: `Rp ${fmt(tx.amount)} · ${new Date(tx.created_at).toLocaleDateString('id-ID')}`
+            }))
+          }],
+          '✏️ Edit Transaksi'
+        )
+        return c.json({ status: 'ok' })
+      }
+
+      // ── Command: bantuan ──
+      if (cmd === 'bantuan' || cmd === 'help') {
+        const premiumInfo = user.is_premium ? '\n⭐ *Status: Premium*' : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
+        await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Edit & Hapus:*\n- *hapus terakhir* — hapus transaksi terakhir\n- *hapus* — pilih transaksi untuk dihapus\n- *edit 50rb* — edit nominal transaksi terakhir\n- *edit* — pilih transaksi untuk diedit\n\n*Set Budget:*\n- "budget makan 500rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // ── Command: upgrade ──
       if (cmd === 'upgrade' || cmd === 'premium' || cmd === 'bayar') {
         if (user.is_premium) {
           const until = new Date(user.premium_until)
@@ -106,16 +279,17 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: saldo ──
       if (cmd === 'saldo' || cmd === 'balance') {
         const { data: transactions } = await supabase.from('transactions').select('type, amount').eq('user_id', user.id)
         const income = transactions?.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0) || 0
         const expense = transactions?.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0) || 0
-        const balance = income - expense
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-        await sendMessage(from, `💰 *Ringkasan Keuangan*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(balance)}`)
+        await sendMessage(from, `💰 *Ringkasan Keuangan*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(income - expense)}`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: riwayat ──
       if (cmd === 'riwayat' || cmd === 'history') {
         const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5)
         if (!transactions || transactions.length === 0) {
@@ -123,38 +297,28 @@ webhook.post('/webhook', async (c) => {
           return c.json({ status: 'ok' })
         }
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-        const list = transactions.map((t, i) => {
-          const emoji = t.type === 'income' ? '💰' : '💸'
-          return `${i + 1}. ${emoji} ${t.description} — Rp ${fmt(t.amount)}\n    🏷️ ${t.category}`
-        }).join('\n\n')
+        const list = transactions.map((t, i) => `${i + 1}. ${t.type === 'income' ? '💰' : '💸'} ${t.description} — Rp ${fmt(t.amount)}\n    🏷️ ${t.category}`).join('\n\n')
         await sendMessage(from, `📋 *5 Transaksi Terakhir*\n\n${list}`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: hari ini ──
       if (cmd === 'hari ini' || cmd === 'today') {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
+        const today = new Date(); today.setHours(0, 0, 0, 0)
         const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id).gte('created_at', today.toISOString()).order('created_at', { ascending: false })
-        if (!transactions || transactions.length === 0) {
-          await sendMessage(from, 'Belum ada transaksi hari ini. Yuk catat! 📝')
-          return c.json({ status: 'ok' })
-        }
+        if (!transactions || transactions.length === 0) { await sendMessage(from, 'Belum ada transaksi hari ini. Yuk catat! 📝'); return c.json({ status: 'ok' }) }
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-        const list = transactions.map(t => `${t.type === 'income' ? '💰' : '💸'} ${t.description} — Rp ${fmt(t.amount)}`).join('\n')
-        await sendMessage(from, `📅 *Transaksi Hari Ini*\n\n${list}\n\n📈 Masuk: Rp ${fmt(income)}\n📉 Keluar: Rp ${fmt(expense)}`)
+        await sendMessage(from, `📅 *Transaksi Hari Ini*\n\n${transactions.map(t => `${t.type === 'income' ? '💰' : '💸'} ${t.description} — Rp ${fmt(t.amount)}`).join('\n')}\n\n📈 Masuk: Rp ${fmt(income)}\n📉 Keluar: Rp ${fmt(expense)}`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: minggu ini ──
       if (cmd === 'minggu ini' || cmd === 'weekly') {
-        const weekAgo = new Date()
-        weekAgo.setDate(weekAgo.getDate() - 7)
+        const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7)
         const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id).gte('created_at', weekAgo.toISOString()).order('created_at', { ascending: false })
-        if (!transactions || transactions.length === 0) {
-          await sendMessage(from, 'Belum ada transaksi minggu ini. Yuk catat! 📝')
-          return c.json({ status: 'ok' })
-        }
+        if (!transactions || transactions.length === 0) { await sendMessage(from, 'Belum ada transaksi minggu ini. Yuk catat! 📝'); return c.json({ status: 'ok' }) }
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
@@ -165,14 +329,12 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: bulan ini ──
       if (cmd === 'bulan ini' || cmd === 'monthly') {
         const now = new Date()
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
         const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id).gte('created_at', firstDay.toISOString()).order('created_at', { ascending: false })
-        if (!transactions || transactions.length === 0) {
-          await sendMessage(from, 'Belum ada transaksi bulan ini. Yuk catat! 📝')
-          return c.json({ status: 'ok' })
-        }
+        if (!transactions || transactions.length === 0) { await sendMessage(from, 'Belum ada transaksi bulan ini. Yuk catat! 📝'); return c.json({ status: 'ok' }) }
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
         const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
         const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
@@ -180,40 +342,38 @@ webhook.post('/webhook', async (c) => {
         transactions.filter(t => t.type === 'expense').forEach(t => { byCategory[t.category] = (byCategory[t.category] || 0) + t.amount })
         const categoryList = Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([cat, amt]) => `  • ${cat}: Rp ${fmt(amt)}`).join('\n')
         const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
-        await sendMessage(from, `📅 *Laporan ${months[now.getMonth()]} ${now.getFullYear()}*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(income - expense)}\n📊 Total transaksi: ${transactions.length}x\n\n*Top Pengeluaran:*\n${categoryList || '  Belum ada'}`)
+        await sendMessage(from, `📅 *Laporan ${months[now.getMonth()]} ${now.getFullYear()}*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(income - expense)}\n📊 Total: ${transactions.length}x\n\n*Top Pengeluaran:*\n${categoryList || '  Belum ada'}`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: budget ──
       if (cmd === 'budget') {
         const { data: budgets } = await supabase.from('budgets').select('*').eq('user_id', user.id)
-        if (!budgets || budgets.length === 0) {
-          await sendMessage(from, 'Belum ada budget. Set budget dengan cara:\n- "budget makan 500rb"\n- "budget transport 300rb"')
-          return c.json({ status: 'ok' })
-        }
+        if (!budgets || budgets.length === 0) { await sendMessage(from, 'Belum ada budget. Set budget: "budget makan 500rb"'); return c.json({ status: 'ok' }) }
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-        const now = new Date()
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+        const now = new Date(); const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
         const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id).eq('type', 'expense').gte('created_at', firstDay.toISOString())
         const list = budgets.map(b => {
           const spent = transactions?.filter(t => t.category === b.category).reduce((sum, t) => sum + t.amount, 0) || 0
           const pct = Math.round((spent / b.amount) * 100)
-          const bar = pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '🟢'
-          return `${bar} *${b.category}*: Rp ${fmt(spent)} / Rp ${fmt(b.amount)} (${pct}%)`
+          return `${pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '🟢'} *${b.category}*: Rp ${fmt(spent)} / Rp ${fmt(b.amount)} (${pct}%)`
         }).join('\n')
         await sendMessage(from, `🎯 *Budget Bulan Ini*\n\n${list}\n\n🟢 Aman  🟡 Hampir habis  🔴 Melebihi`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: profil ──
       if (cmd === 'profil' || cmd === 'profile') {
         const profile = await getProfile(user.id)
         const badgeList = profile.badges.length > 0 ? profile.badges.map(b => `${b.badge_emoji} ${b.badge_name}`).join('\n') : '  Belum ada badge. Mulai catat transaksi!'
         const streakEmoji = profile.streak >= 7 ? '🔥' : profile.streak >= 3 ? '⚡' : '✨'
         const name = user.name ? `*${user.name}*\n` : ''
         const premiumStatus = user.is_premium ? '\n⭐ Status: *Premium*' : '\n💎 Status: Gratis — ketik *upgrade* untuk premium'
-        await sendMessage(from, `👤 *Profil Kamu*\n\n${name}${streakEmoji} Streak: ${profile.streak} hari berturut-turut\n🏆 Streak terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}${premiumStatus}\n\n*Badge yang diraih:*\n${badgeList}`)
+        await sendMessage(from, `👤 *Profil Kamu*\n\n${name}${streakEmoji} Streak: ${profile.streak} hari\n🏆 Terpanjang: ${profile.longestStreak} hari\n📊 Total transaksi: ${profile.totalTransactions}${premiumStatus}\n\n*Badge:*\n${badgeList}`)
         return c.json({ status: 'ok' })
       }
 
+      // ── Command: set budget ──
       const budgetMatch = cmd?.match(/^budget\s+(\w+)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)$/i)
       if (budgetMatch) {
         const category = budgetMatch[1].toLowerCase()
@@ -222,18 +382,17 @@ webhook.post('/webhook', async (c) => {
         if (amountStr.includes('jt') || amountStr.includes('juta')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
         else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
         else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
-
         if (amount > 0) {
           await supabase.from('budgets').upsert({ user_id: user.id, category, amount, period: 'monthly' }, { onConflict: 'user_id,category,period' })
           const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-          await sendMessage(from, `✅ *Budget diset!*\n\n🏷️ Kategori: ${category}\n💵 Budget: Rp ${fmt(amount)}/bulan\n\nAku akan notif kamu kalau pengeluaran mendekati batas!`)
+          await sendMessage(from, `✅ *Budget diset!*\n\n🏷️ Kategori: ${category}\n💵 Budget: Rp ${fmt(amount)}/bulan`)
         } else {
           await sendMessage(from, 'Format budget salah. Coba: "budget makan 500rb"')
         }
         return c.json({ status: 'ok' })
       }
 
-      // Default: AI parsing transaksi
+      // ── Default: AI parsing transaksi ──
       const parsed = await parseTransaction(text)
       console.log('Parsed:', parsed)
 
@@ -242,43 +401,31 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
-      await supabase.from('transactions').insert({
-        user_id: user.id,
-        type: parsed.type,
-        amount: parsed.amount,
-        category: parsed.category,
-        description: parsed.description,
-      })
+      await supabase.from('transactions').insert({ user_id: user.id, type: parsed.type, amount: parsed.amount, category: parsed.category, description: parsed.description })
 
       const { streak, newBadges } = await updateStreak(user.id)
 
       let budgetAlert = ''
       if (parsed.type === 'expense') {
-        const now = new Date()
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+        const now = new Date(); const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
         const { data: budget } = await supabase.from('budgets').select('*').eq('user_id', user.id).eq('category', parsed.category).single()
         if (budget) {
           const { data: txThisMonth } = await supabase.from('transactions').select('amount').eq('user_id', user.id).eq('category', parsed.category).eq('type', 'expense').gte('created_at', firstDay.toISOString())
           const totalSpent = txThisMonth?.reduce((sum, t) => sum + t.amount, 0) || 0
           const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
           const pct = Math.round((totalSpent / budget.amount) * 100)
-          if (pct >= 100) budgetAlert = `\n\n🔴 *Budget Alert!* Pengeluaran ${parsed.category} bulan ini sudah *melebihi budget* (${pct}%)! Total: Rp ${fmt(totalSpent)} dari Rp ${fmt(budget.amount)}.`
-          else if (pct >= 80) budgetAlert = `\n\n⚠️ *Budget Alert!* Pengeluaran ${parsed.category} sudah ${pct}% dari budget. Sisa Rp ${fmt(budget.amount - totalSpent)} lagi.`
+          if (pct >= 100) budgetAlert = `\n\n🔴 *Budget Alert!* Pengeluaran ${parsed.category} sudah *melebihi budget* (${pct}%)! Total: Rp ${fmt(totalSpent)} dari Rp ${fmt(budget.amount)}.`
+          else if (pct >= 80) budgetAlert = `\n\n⚠️ *Budget Alert!* Pengeluaran ${parsed.category} sudah ${pct}%. Sisa Rp ${fmt(budget.amount - totalSpent)} lagi.`
         }
       }
 
       const badgeText = newBadges.length > 0 ? `\n\n🎉 *Badge baru!*\n${newBadges.map(b => `${b.emoji} ${b.name}`).join('\n')}` : ''
       const streakText = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
-
       const { data: recentTx } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
       const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [])
-
-      const emoji = parsed.type === 'income' ? '💰' : '💸'
-      const typeText = parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'
       const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-      const insightText = insight ? `\n\n💡 *Insight:* ${insight}` : ''
 
-      await sendMessage(from, `${emoji} *${typeText} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insightText}`)
+      await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}`)
 
     } catch (err) {
       console.error('Error:', err)
