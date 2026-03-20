@@ -71,6 +71,11 @@ webhook.post('/webhook', async (c) => {
     console.log(`Message from ${from}: ${text} (buttonId: ${buttonId}, type: ${msgType})`)
     markAsRead(message.id).catch(() => {})
 
+    // Duplicate protection
+    const { data: existing } = await supabase.from('processed_messages').select('message_id').eq('message_id', message.id).single()
+    if (existing) { console.log(`Duplicate message skipped: ${message.id}`); return c.json({ status: 'ok' }) }
+    await supabase.from('processed_messages').insert({ message_id: message.id })
+
     try {
       let { data: user } = await supabase.from('users').select('*').eq('phone', from).single()
 
