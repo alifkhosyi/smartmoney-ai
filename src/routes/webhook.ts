@@ -4,6 +4,7 @@ import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
+import { getOrCreateUserSheet, appendTransaction, getSheetUrl } from '../services/googleSheets.js'
 
 const webhook = new Hono()
 
@@ -110,6 +111,17 @@ webhook.post('/webhook', async (c) => {
           : '\n\n💎 *Upgrade Premium* — Ketik *upgrade* untuk fitur lengkap (Rp 29.000/bulan)'
 
         await sendMessage(from, `*SmartMoney AI - Menu Bantuan* 🤖\n\n*Catat Transaksi:*\n- "makan siang 35rb"\n- "gajian 5jt"\n- "transfer gopay 100rb"\n\n*Lihat Data:*\n- *saldo* — ringkasan keuangan\n- *riwayat* — 5 transaksi terakhir\n- *hari ini* — transaksi hari ini\n- *minggu ini* — laporan mingguan\n- *bulan ini* — laporan bulanan\n- *budget* — lihat semua budget\n- *profil* — streak & badge kamu\n\n*Set Budget:*\n- "budget makan 500rb"\n- "budget transport 300rb"\n\n*Lainnya:*\n- *bantuan* — tampilkan menu ini${premiumInfo}`)
+        return c.json({ status: 'ok' })
+      }
+
+      // Command: laporan (Google Sheets)
+      if (cmd === 'laporan' || cmd === 'sheet' || cmd === 'spreadsheet') {
+        const spreadsheetId = user.spreadsheet_id || await getOrCreateUserSheet(user.id, from).then(id => {
+          supabase.from('users').update({ spreadsheet_id: id }).eq('id', user.id)
+          return id
+        })
+        const sheetUrl = getSheetUrl(spreadsheetId)
+        await sendMessage(from, `📊 *Laporan Keuanganmu*\n\nBerikut link Google Sheet kamu yang berisi:\n✅ Semua transaksi\n✅ Ringkasan per bulan\n✅ Breakdown per kategori\n\n👇 Buka laporanmu:\n${sheetUrl}\n\n_Data otomatis terupdate setiap kamu catat transaksi baru!_`)
         return c.json({ status: 'ok' })
       }
 
@@ -363,6 +375,21 @@ webhook.post('/webhook', async (c) => {
         category: parsed.category,
         description: parsed.description,
       })
+
+      // Sync ke Google Sheets (background, tidak block response)
+      getOrCreateUserSheet(user.id, from).then(spreadsheetId => {
+        appendTransaction(spreadsheetId, {
+          date: new Date().toISOString(),
+          type: parsed.type,
+          category: parsed.category,
+          description: parsed.description,
+          amount: parsed.amount
+        })
+        // Simpan spreadsheetId ke user record kalau belum ada
+        if (!user.spreadsheet_id) {
+          supabase.from('users').update({ spreadsheet_id: spreadsheetId }).eq('id', user.id)
+        }
+      }).catch(err => console.error('Sheets sync error:', err))
 
       // Update streak & cek badge baru
       const { streak, newBadges } = await updateStreak(user.id)
