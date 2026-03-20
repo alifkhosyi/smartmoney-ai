@@ -10,25 +10,11 @@ const headers = {
   'Content-Type': 'application/json'
 }
 
-export async function sendTyping(to: string) {
-  const url = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`
-  await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to,
-      type: 'reaction',
-      reaction: { message_id: 'typing', emoji: '⏳' }
-    })
-  }).catch(() => {})
-}
+const url = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`
 
 export async function markAsRead(messageId: string) {
-  const url = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`
   await fetch(url, {
-    method: 'POST',
-    headers,
+    method: 'POST', headers,
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       status: 'read',
@@ -38,11 +24,8 @@ export async function markAsRead(messageId: string) {
 }
 
 export async function sendMessage(to: string, message: string) {
-  const url = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`
-
   const response = await fetch(url, {
-    method: 'POST',
-    headers,
+    method: 'POST', headers,
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       to,
@@ -50,7 +33,66 @@ export async function sendMessage(to: string, message: string) {
       text: { body: message }
     })
   })
+  return response.json()
+}
 
-  const data = await response.json()
-  return data
+// Quick Reply Buttons — max 3 tombol
+export async function sendButtons(
+  to: string,
+  body: string,
+  buttons: { id: string; title: string }[],
+  header?: string,
+  footer?: string
+) {
+  const response = await fetch(url, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        ...(header && { header: { type: 'text', text: header } }),
+        body: { text: body },
+        ...(footer && { footer: { text: footer } }),
+        action: {
+          buttons: buttons.map(b => ({
+            type: 'reply',
+            reply: { id: b.id, title: b.title }
+          }))
+        }
+      }
+    })
+  })
+  return response.json()
+}
+
+// List Message — max 10 pilihan
+export async function sendList(
+  to: string,
+  body: string,
+  buttonText: string,
+  sections: { title: string; rows: { id: string; title: string; description?: string }[] }[],
+  header?: string,
+  footer?: string
+) {
+  const response = await fetch(url, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        ...(header && { header: { type: 'text', text: header } }),
+        body: { text: body },
+        ...(footer && { footer: { text: footer } }),
+        action: {
+          button: buttonText,
+          sections
+        }
+      }
+    })
+  })
+  return response.json()
 }

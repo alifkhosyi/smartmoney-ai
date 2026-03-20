@@ -4,7 +4,7 @@ import { parseTransaction, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
-import { getOrCreateUserSheet, appendTransaction, getSheetUrl } from '../services/googleSheets.js'
+import { handleOnboarding, isOnboarding } from '../services/onboarding.js'
 
 const webhook = new Hono()
 
@@ -78,9 +78,26 @@ webhook.post('/webhook', async (c) => {
 
   if (message) {
     const from = message.from
-    const text = message?.text?.body?.trim()
+    const msgType = message?.type
 
-    console.log(`Message from ${from}: ${text}`)
+    // Handle interactive button/list replies
+    let text = ''
+    let buttonId: string | undefined = undefined
+
+    if (msgType === 'interactive') {
+      const interactive = message?.interactive
+      if (interactive?.type === 'button_reply') {
+        buttonId = interactive.button_reply?.id
+        text = interactive.button_reply?.title || ''
+      } else if (interactive?.type === 'list_reply') {
+        buttonId = interactive.list_reply?.id
+        text = interactive.list_reply?.title || ''
+      }
+    } else {
+      text = message?.text?.body?.trim() || ''
+    }
+
+    console.log(`Message from ${from}: ${text} (buttonId: ${buttonId})`)
     markAsRead(message.id).catch(() => {})
 
     try {
@@ -98,8 +115,16 @@ webhook.post('/webhook', async (c) => {
           .single()
         user = newUser
 
-        await sendMessage(from, 'Halo! Selamat datang di *SmartMoney AI* 👋\n\nAku asisten keuanganmu. Langsung ketik transaksimu:\n- "makan siang 35rb"\n- "gajian 5jt"\n- "gopay 150rb bensin"\n\nKetik *bantuan* untuk lihat semua fitur.')
+        // Trigger onboarding step 0 for new user
+        await handleOnboarding(user, text, from, buttonId)
         return c.json({ status: 'ok' })
+      }
+
+      // Handle onboarding for existing user not finished yet
+      if (isOnboarding(user)) {
+        const handled = await handleOnboarding(user, text, from, buttonId)
+        if (handled) return c.json({ status: 'ok' })
+        // If not handled (step 4 = first transaction), continue to parse
       }
 
       const cmd = text?.toLowerCase()
