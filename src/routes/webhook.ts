@@ -10,6 +10,7 @@ import { parseReceiptImage } from '../services/ai/ocr.js'
 import { checkOcrLimit, checkBudgetLimit, getUpsellMessage, PLAN_NAMES } from '../services/planLimits.js'
 import { addXp, formatXpMessage, checkDailyBonus, updateWeeklyChallenge, initWeeklyChallenges } from '../services/xp.js'
 import { generateShareCard } from '../services/shareCard.js'
+import { parseGoalCommand, createGoal, addToGoal, listGoals } from '../services/goals.js'
 import { sendImage } from '../services/whatsapp/client.js'
 import * as fs from 'fs'
 
@@ -374,6 +375,41 @@ webhook.post('/webhook', async (c) => {
           '✏️ Edit Transaksi'
         )
         return c.json({ status: 'ok' })
+      }
+
+      // ── Command: goals ──
+      const goalCmd = parseGoalCommand(text)
+      if (goalCmd.type !== null) {
+        const plan = (user.plan || 'free') as string
+
+        if (goalCmd.type === 'list') {
+          const msg = await listGoals(user.id)
+          await sendMessage(from, msg)
+          return c.json({ status: 'ok' })
+        }
+
+        if (goalCmd.type === 'create' && goalCmd.name && goalCmd.amount && goalCmd.deadline) {
+          const msg = await createGoal(user.id, goalCmd.name, goalCmd.amount, goalCmd.deadline, plan)
+          await sendMessage(from, msg)
+          if (msg.includes('berhasil dibuat')) {
+            const xpRes = await addXp(user.id, 'set_budget')
+            await sendMessage(from, formatXpMessage(xpRes))
+          }
+          return c.json({ status: 'ok' })
+        }
+
+        if (goalCmd.type === 'add' && goalCmd.keyword && goalCmd.amount) {
+          const msg = await addToGoal(user.id, goalCmd.keyword, goalCmd.amount)
+          await sendMessage(from, msg)
+          if (msg.includes('GOAL TERCAPAI')) {
+            const xpRes = await addXp(user.id, 'goal_achieved')
+            await sendMessage(from, formatXpMessage(xpRes))
+          } else {
+            const xpRes = await addXp(user.id, 'transaction', 5)
+            await sendMessage(from, formatXpMessage(xpRes))
+          }
+          return c.json({ status: 'ok' })
+        }
       }
 
       // ── Command: share ──
