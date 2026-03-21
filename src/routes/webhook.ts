@@ -684,6 +684,30 @@ Coba gratis via WhatsApp!`
       const badgeText = newBadges.length > 0 ? `\n\n🎉 *Badge baru!*\n${newBadges.map(b => `${b.emoji} ${b.name}`).join('\n')}` : ''
       const streakText = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
 
+      // Auto share card saat streak milestone atau level up (khusus premium)
+      const userPlan = user.plan || 'free'
+      if (userPlan !== 'free') {
+        try {
+          // Share card streak milestone (7 dan 30 hari)
+          if (streak === 7 || streak === 30) {
+            const imgPath = await generateShareCard({ type: 'streak', name: user.name || 'Sobat', streak })
+            const imgBuffer = fs.readFileSync(imgPath)
+            fs.unlinkSync(imgPath)
+            await sendImage(from, imgBuffer, `🔥 ${streak} hari streak! Konsisten banget! Simpan dan share ke story kamu ya!`)
+          }
+
+          // Share card level up
+          if (xpResult.leveledUp) {
+            const imgPath = await generateShareCard({ type: 'level_up', name: user.name || 'Sobat', levelName: xpResult.levelName })
+            const imgBuffer = fs.readFileSync(imgPath)
+            fs.unlinkSync(imgPath)
+            await sendImage(from, imgBuffer, `⚡ Level up! Sekarang ${xpResult.levelName}! Share ke story kamu! 🎉`)
+          }
+        } catch (err) {
+          console.error('[ShareCard] Error:', err)
+        }
+      }
+
       if (parseResult.isMultiple) {
         const totalExpense = parseResult.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
         const totalIncome = parseResult.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
