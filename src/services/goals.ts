@@ -99,11 +99,39 @@ export async function handleGoalTemplate(phone: string, templateId: string, user
 
 // Handle input amount setelah pilih template
 export async function handleGoalAmount(phone: string, text: string, userId: string, pendingAction: any) {
-  const amountStr = text.toLowerCase().trim()
+  // Parser amount robust — support semua format
+  // Contoh: 500jt, 500 jt, 500juta, 500 juta, Rp 500jt, rp500.000, 500.000.000, 500k, 500rb, 500ribu, 1.5jt, 1,5jt
+  const rawAmount = text.toLowerCase()
+    .replace(/rp\.?\s*/g, '')   // hapus Rp
+    .replace(/,/g, '.')          // ganti koma jadi titik
+    .trim()
+
+  // Hapus titik ribuan kalau formatnya 500.000 atau 1.000.000
+  // Tapi jaga desimal seperti 1.5
+  let normalized = rawAmount
+  const dotCount = (rawAmount.match(/\./g) || []).length
+  if (dotCount > 1) {
+    // format ribuan: 500.000.000 → 500000000
+    normalized = rawAmount.replace(/\./g, '')
+  }
+
+  // Hapus semua karakter non-angka kecuali titik
+  const numStr = normalized.replace(/[^\d.]/g, '')
+  const baseNum = parseFloat(numStr) || 0
+
   let amount = 0
-  if (amountStr.includes('jt') || amountStr.includes('juta')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
-  else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
-  else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
+  if (rawAmount.includes('miliar') || rawAmount.includes('mld') || rawAmount.includes('milyar')) {
+    amount = baseNum * 1000000000
+  } else if (rawAmount.match(/\d\s*m\b/) && !rawAmount.includes('makan') && !rawAmount.includes('motor')) {
+    amount = baseNum * 1000000
+  } else if (rawAmount.includes('juta') || rawAmount.includes('jt')) {
+    amount = baseNum * 1000000
+  } else if (rawAmount.includes('ribu') || rawAmount.includes('rb') || rawAmount.includes('k')) {
+    amount = baseNum * 1000
+  } else {
+    // Angka polos — kalau < 1000 anggap sudah dalam ribuan (misal "500" = 500rb? tidak, biarkan as-is)
+    amount = baseNum
+  }
 
   if (!amount || amount <= 0) {
     await sendMessage(phone, '❌ Nominal tidak valid. Coba lagi, contoh: _5jt_ atau _5000000_')
