@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { sendMessage, markAsRead, sendButtons, sendList } from '../services/whatsapp/client.js'
-import { parseTransaction, generateInsight } from '../services/ai/parser.js'
+import { parseTransaction, parseTransactions, generateInsight } from '../services/ai/parser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
@@ -597,53 +597,64 @@ Coba gratis via WhatsApp!`
         return c.json({ status: 'ok' })
       }
 
-      // ── Default: AI parsing transaksi ──
-      const parsed = await parseTransaction(text)
-      console.log('Parsed:', parsed)
+      // ── Default: AI parsing transaksi (support multi) ──
+      const parseResult = await parseTransactions(text)
+      console.log('Parsed:', parseResult)
 
-      if (parsed.type === 'unknown' || parsed.amount === 0) {
-        await sendMessage(from, 'Hmm, aku kurang paham. Coba ketik:\n- "makan 25rb"\n- "gaji 5jt"\n- "bensin gopay 50rb"\n\nAtau ketik *bantuan* untuk lihat menu.')
+      if (!parseResult.transactions.length || parseResult.transactions[0].type === 'unknown' || parseResult.transactions[0].amount === 0) {
+        await sendMessage(from, 'Hmm, aku kurang paham. Coba ketik:\n- "makan 25rb"\n- "gaji 5jt"\n- "beli kopi 15rb, bensin 50rb, makan siang 25rb"\n\nAtau ketik *bantuan* untuk lihat menu.')
         return c.json({ status: 'ok' })
       }
 
-      await supabase.from('transactions').insert({ user_id: user.id, type: parsed.type, amount: parsed.amount, category: parsed.category, description: parsed.description })
+      const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
-      // XP untuk transaksi
-      const xpResult = await addXp(user.id, 'transaction')
+      // Simpan semua transaksi
+      for (const tx of parseResult.transactions) {
+        await supabase.from('transactions').insert({ user_id: user.id, type: tx.type, amount: tx.amount, category: tx.category, description: tx.description })
+      }
+
+      const { streak, newBadges } = await updateStreak(user.id)
+      const xpResult = await addXp(user.id, 'transaction', parseResult.transactions.length * 10)
       const dailyBonus = await checkDailyBonus(user.id)
       let bonusXpResult = null
       if (dailyBonus) bonusXpResult = await addXp(user.id, 'transaction_bonus_3x')
-
-      // Update weekly challenge transaksi
       await updateWeeklyChallenge(user.id, 'transactions_5')
       await updateWeeklyChallenge(user.id, 'daily_streak')
       await initWeeklyChallenges(user.id)
 
-      const { streak, newBadges } = await updateStreak(user.id)
-
-      let budgetAlert = ''
-      if (parsed.type === 'expense') {
-        const now = new Date(); const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-        const { data: budget } = await supabase.from('budgets').select('*').eq('user_id', user.id).eq('category', parsed.category).single()
-        if (budget) {
-          const { data: txThisMonth } = await supabase.from('transactions').select('amount').eq('user_id', user.id).eq('category', parsed.category).eq('type', 'expense').gte('created_at', firstDay.toISOString())
-          const totalSpent = txThisMonth?.reduce((sum, t) => sum + t.amount, 0) || 0
-          const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-          const pct = Math.round((totalSpent / budget.amount) * 100)
-          if (pct >= 100) budgetAlert = `\n\n🔴 *Budget Alert!* Pengeluaran ${parsed.category} sudah *melebihi budget* (${pct}%)! Total: Rp ${fmt(totalSpent)} dari Rp ${fmt(budget.amount)}.`
-          else if (pct >= 80) budgetAlert = `\n\n⚠️ *Budget Alert!* Pengeluaran ${parsed.category} sudah ${pct}%. Sisa Rp ${fmt(budget.amount - totalSpent)} lagi.`
-        }
-      }
-
-      const badgeText = newBadges.length > 0 ? `\n\n🎉 *Badge baru!*\n${newBadges.map(b => `${b.emoji} ${b.name}`).join('\n')}` : ''
-      const streakText = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
-      const { data: recentTx } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
-      const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [])
-      const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-
       const xpText = formatXpMessage(xpResult)
       const bonusXpText = bonusXpResult ? `\n🎯 *Bonus 3x transaksi hari ini!*${formatXpMessage(bonusXpResult)}` : ''
-      await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}${xpText}${bonusXpText}`)
+      const badgeText = newBadges.length > 0 ? `\n\n🎉 *Badge baru!*\n${newBadges.map(b => `${b.emoji} ${b.name}`).join('\n')}` : ''
+      const streakText = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
+
+      if (parseResult.isMultiple) {
+        const totalExpense = parseResult.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+        const totalIncome = parseResult.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+        const txList = parseResult.transactions.map(t => `${t.type === 'income' ? '💰' : '💸'} ${t.description} — Rp ${fmt(t.amount)} (${t.category})`).join('\n')
+        await sendMessage(from,
+          `✅ *${parseResult.transactions.length} transaksi dicatat!*\n\n${txList}` +
+          `${totalExpense > 0 ? `\n\n💸 Total pengeluaran: Rp ${fmt(totalExpense)}` : ''}` +
+          `${totalIncome > 0 ? `\n💰 Total pemasukan: Rp ${fmt(totalIncome)}` : ''}` +
+          `${streakText}${badgeText}${xpText}${bonusXpText}`
+        )
+      } else {
+        const parsed = parseResult.transactions[0]
+        let budgetAlert = ''
+        if (parsed.type === 'expense') {
+          const now = new Date(); const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+          const { data: budget } = await supabase.from('budgets').select('*').eq('user_id', user.id).eq('category', parsed.category).single()
+          if (budget) {
+            const { data: txThisMonth } = await supabase.from('transactions').select('amount').eq('user_id', user.id).eq('category', parsed.category).eq('type', 'expense').gte('created_at', firstDay.toISOString())
+            const totalSpent = txThisMonth?.reduce((sum, t) => sum + t.amount, 0) || 0
+            const pct = Math.round((totalSpent / budget.amount) * 100)
+            if (pct >= 100) budgetAlert = `\n\n🔴 *Budget Alert!* Pengeluaran ${parsed.category} sudah *melebihi budget* (${pct}%)! Total: Rp ${fmt(totalSpent)} dari Rp ${fmt(budget.amount)}.`
+            else if (pct >= 80) budgetAlert = `\n\n⚠️ *Budget Alert!* Pengeluaran ${parsed.category} sudah ${pct}%. Sisa Rp ${fmt(budget.amount - totalSpent)} lagi.`
+          }
+        }
+        const { data: recentTx } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
+        const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [])
+        await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}${xpText}${bonusXpText}`)
+      }
 
     } catch (err) {
       console.error('Error:', err)
