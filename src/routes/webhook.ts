@@ -704,7 +704,9 @@ Coba gratis via WhatsApp!`
             await sendImage(from, imgBuffer, `⚡ Level up! Sekarang ${xpResult.levelName}! Share ke story kamu! 🎉`)
           }
         } catch (err) {
-          console.error('[ShareCard] Error:', err)
+          console.error('[ShareCard] Error detail:', err)
+          console.error('[ShareCard] Error message:', (err as any)?.message)
+          console.error('[ShareCard] Error stack:', (err as any)?.stack)
         }
       }
 

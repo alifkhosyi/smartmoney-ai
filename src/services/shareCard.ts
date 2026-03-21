@@ -16,140 +16,186 @@ export interface ShareCardData {
 }
 
 function formatRupiah(amount: number): string {
-  if (amount >= 1000000) return `Rp ${(amount / 1000000).toFixed(1)}jt`
-  if (amount >= 1000) return `Rp ${(amount / 1000).toFixed(0)}rb`
+  if (amount >= 1000000000) return `Rp ${(amount / 1000000000).toFixed(1)} M`
+  if (amount >= 1000000) return `Rp ${(amount / 1000000).toFixed(1)} jt`
+  if (amount >= 1000) return `Rp ${(amount / 1000).toFixed(0)} rb`
   return `Rp ${amount}`
 }
 
+function wrapText(ctx: any, text: string, maxWidth: number): string[] {
+  const words = text.split(' ')
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word
+    if (ctx.measureText(test).width > maxWidth && current) {
+      lines.push(current)
+      current = word
+    } else {
+      current = test
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
 export async function generateShareCard(data: ShareCardData): Promise<string> {
-  const width = 1080
-  const height = 1920
-  const canvas = createCanvas(width, height)
+  const W = 1080
+  const H = 1920
+  const canvas = createCanvas(W, H)
   const ctx = canvas.getContext('2d')
 
-  const bgColors: Record<ShareCardType, string[]> = {
-    monthly_save:  ['#0F2027', '#203A43', '#2C5364'],
-    streak:        ['#1A1A2E', '#16213E', '#0F3460'],
-    level_up:      ['#1A0533', '#2D1B69', '#4A2080'],
-    goal_achieved: ['#0D1F0D', '#1A3A1A', '#2D5A2D'],
+  // ── Background solid (no gradient, more reliable) ──
+  const bgMap: Record<ShareCardType, string> = {
+    monthly_save:  '#1a1a2e',
+    streak:        '#16213e',
+    level_up:      '#1a0533',
+    goal_achieved: '#0d2818',
   }
-
-  const [c1, c2, c3] = bgColors[data.type]
-  const gradient = ctx.createLinearGradient(0, 0, 0, height)
-  gradient.addColorStop(0, c1)
-  gradient.addColorStop(0.5, c2)
-  gradient.addColorStop(1, c3)
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, width, height)
-
-  ctx.globalAlpha = 0.08
-  ctx.fillStyle = '#ffffff'
-  ctx.beginPath(); ctx.arc(900, 200, 300, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.arc(100, 1700, 250, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.arc(540, 960, 400, 0, Math.PI * 2); ctx.fill()
-  ctx.globalAlpha = 1
-
-  ctx.fillStyle = 'rgba(255,255,255,0.15)'
-  ctx.beginPath()
-  ctx.roundRect(60, 80, 320, 60, [30])
-  ctx.fill()
-  ctx.fillStyle = '#ffffff'
-  ctx.font = 'bold 28px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.fillText('SmartMoney AI', 220, 120)
-
-  // Ganti emoji dengan shape karena Linux server tidak support emoji font
-  const typeColors: Record<ShareCardType, string> = {
+  const accentMap: Record<ShareCardType, string> = {
     monthly_save:  '#FFD700',
     streak:        '#FF6B35',
     level_up:      '#C084FC',
-    goal_achieved: '#86EFAC',
+    goal_achieved: '#4ADE80',
   }
-  const typeSymbols: Record<ShareCardType, string> = {
-    monthly_save:  'Rp',
-    streak:        'STREAK',
-    level_up:      'LEVEL',
-    goal_achieved: 'GOAL',
-  }
-  // Draw colored circle sebagai icon
-  ctx.fillStyle = typeColors[data.type]
-  ctx.globalAlpha = 0.2
+
+  const bg = bgMap[data.type]
+  const accent = accentMap[data.type]
+
+  // Background
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, W, H)
+
+  // Top accent bar
+  ctx.fillStyle = accent
+  ctx.fillRect(0, 0, W, 12)
+
+  // Bottom accent bar
+  ctx.fillRect(0, H - 12, W, 12)
+
+  // Big circle decoration
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.06
   ctx.beginPath()
-  ctx.arc(width / 2, 460, 160, 0, Math.PI * 2)
+  ctx.arc(W * 0.85, H * 0.18, 380, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(W * 0.1, H * 0.82, 300, 0, Math.PI * 2)
   ctx.fill()
   ctx.globalAlpha = 1
-  ctx.fillStyle = typeColors[data.type]
-  ctx.font = 'bold 72px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.fillText(typeSymbols[data.type], width / 2, 490)
 
+  // ── Brand name ──
+  ctx.fillStyle = '#ffffff'
+  ctx.globalAlpha = 0.5
+  ctx.font = 'bold 36px Arial'
+  ctx.textAlign = 'left'
+  ctx.fillText('SmartMoney AI', 80, 100)
+  ctx.globalAlpha = 1
+
+  // ── Horizontal divider ──
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.3
+  ctx.fillRect(80, 120, 920, 2)
+  ctx.globalAlpha = 1
+
+  // ── Main type label ──
+  const typeLabel: Record<ShareCardType, string> = {
+    monthly_save:  'LAPORAN BULANAN',
+    streak:        'STREAK KONSISTEN',
+    level_up:      'LEVEL UP!',
+    goal_achieved: 'GOAL TERCAPAI!',
+  }
+
+  ctx.fillStyle = accent
+  ctx.font = 'bold 52px Arial'
+  ctx.textAlign = 'center'
+  ctx.fillText(typeLabel[data.type], W / 2, 260)
+
+  // ── Main value ──
   ctx.fillStyle = '#ffffff'
   if (data.type === 'monthly_save' && data.value !== undefined) {
-    ctx.font = 'bold 88px sans-serif'
-    ctx.fillStyle = '#FFD700'
-    ctx.fillText(formatRupiah(data.value), width / 2, 780)
-    ctx.font = 'bold 44px sans-serif'
+    ctx.font = 'bold 110px Arial'
+    ctx.fillStyle = accent
+    ctx.fillText(formatRupiah(data.value), W / 2, 520)
+    ctx.font = 'bold 52px Arial'
     ctx.fillStyle = '#ffffff'
-    ctx.fillText('hemat bulan ini!', width / 2, 860)
+    ctx.fillText('berhasil dihemat!', W / 2, 620)
+
   } else if (data.type === 'streak' && data.streak !== undefined) {
-    ctx.font = 'bold 200px sans-serif'
-    ctx.fillStyle = '#FF6B35'
-    ctx.fillText(`${data.streak}`, width / 2, 820)
-    ctx.font = 'bold 52px sans-serif'
+    ctx.font = 'bold 280px Arial'
+    ctx.fillStyle = accent
+    ctx.fillText(`${data.streak}`, W / 2, 620)
+    ctx.font = 'bold 56px Arial'
     ctx.fillStyle = '#ffffff'
-    ctx.fillText(`HARI KONSISTEN!`, width / 2, 900)
+    ctx.fillText('hari berturut-turut!', W / 2, 720)
+
   } else if (data.type === 'level_up' && data.levelName) {
-    ctx.font = 'bold 80px sans-serif'
-    ctx.fillStyle = '#C084FC'
-    ctx.fillText('LEVEL UP!', width / 2, 740)
-    ctx.font = 'bold 56px sans-serif'
+    const cleanLevel = data.levelName.replace(/[\u{1F300}-\u{1FFFF}]/gu, '').trim()
+    ctx.font = 'bold 100px Arial'
+    ctx.fillStyle = accent
+    ctx.fillText('NAIK LEVEL!', W / 2, 480)
+    ctx.font = 'bold 72px Arial'
     ctx.fillStyle = '#ffffff'
-    // Hapus emoji dari levelName
-    const cleanLevel = data.levelName.replace(/[^\x00-\x7F]/g, '').trim()
-    ctx.fillText(cleanLevel || data.levelName, width / 2, 840)
-  } else if (data.type === 'goal_achieved' && data.goalName && data.value !== undefined) {
-    ctx.font = 'bold 52px sans-serif'
-    ctx.fillStyle = '#86EFAC'
-    ctx.fillText('Goal tercapai!', width / 2, 720)
-    ctx.font = 'bold 80px sans-serif'
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(formatRupiah(data.value), width / 2, 830)
-    ctx.font = 'bold 44px sans-serif'
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.fillText(data.goalName, width / 2, 900)
+    ctx.fillText(cleanLevel, W / 2, 600)
+
+  } else if (data.type === 'goal_achieved' && data.value !== undefined) {
+    ctx.font = 'bold 96px Arial'
+    ctx.fillStyle = accent
+    ctx.fillText(formatRupiah(data.value), W / 2, 500)
+    if (data.goalName) {
+      ctx.font = 'bold 52px Arial'
+      ctx.fillStyle = '#ffffff'
+      const lines = wrapText(ctx, data.goalName, 800)
+      lines.forEach((line, i) => ctx.fillText(line, W / 2, 600 + i * 70))
+    }
   }
 
-  ctx.font = 'bold 44px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.9)'
-  ctx.fillText(data.name, width / 2, 1020)
-
-  const quotes: Record<ShareCardType, string> = {
-    monthly_save:  '"Konsistensi adalah kunci kebebasan finansial"',
-    streak:        '"Kebiasaan kecil, dampak besar"',
-    level_up:      '"Setiap langkah membawa lebih dekat ke tujuan"',
-    goal_achieved: '"Mimpi yang direncanakan menjadi kenyataan"',
-  }
-  ctx.font = 'italic 34px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.45)'
-  ctx.fillText(quotes[data.type], width / 2, 1140)
-
-  ctx.fillStyle = 'rgba(255,255,255,0.12)'
-  ctx.beginPath()
-  ctx.roundRect(120, 1280, 840, 130, [20])
-  ctx.fill()
+  // ── User name ──
+  const cleanName = (data.name || 'Sobat').replace(/[\u{1F300}-\u{1FFFF}]/gu, '').trim()
+  ctx.font = 'bold 48px Arial'
   ctx.fillStyle = '#ffffff'
-  ctx.font = 'bold 36px sans-serif'
-  ctx.fillText('Kelola keuanganmu via WhatsApp', width / 2, 1340)
-  ctx.font = '30px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText('SmartMoney AI • Gratis untuk dicoba', width / 2, 1390)
+  ctx.globalAlpha = 0.7
+  ctx.fillText(cleanName, W / 2, 860)
+  ctx.globalAlpha = 1
 
-  ctx.font = '26px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
-  ctx.fillText('smartmoney-ai-landing.vercel.app', width / 2, 1820)
+  // ── Divider ──
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.2
+  ctx.fillRect(200, 910, 680, 2)
+  ctx.globalAlpha = 1
 
+  // ── Quote ──
+  const quotes: Record<ShareCardType, string> = {
+    monthly_save:  'Konsistensi adalah kunci kebebasan finansial',
+    streak:        'Kebiasaan kecil membawa dampak besar',
+    level_up:      'Setiap langkah membawa lebih dekat ke tujuan',
+    goal_achieved: 'Mimpi yang direncanakan menjadi kenyataan',
+  }
+  ctx.font = 'italic 38px Arial'
+  ctx.fillStyle = '#ffffff'
+  ctx.globalAlpha = 0.45
+  const quoteLines = wrapText(ctx, `"${quotes[data.type]}"`, 820)
+  quoteLines.forEach((line, i) => ctx.fillText(line, W / 2, 980 + i * 55))
+  ctx.globalAlpha = 1
+
+  // ── CTA Box ──
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.12
+  ctx.beginPath()
+  ctx.roundRect(100, 1680, 880, 160, [20])
+  ctx.fill()
+  ctx.globalAlpha = 1
+
+  ctx.fillStyle = '#ffffff'
+  ctx.font = 'bold 38px Arial'
+  ctx.fillText('Kelola keuangan via WhatsApp', W / 2, 1748)
+  ctx.font = '32px Arial'
+  ctx.globalAlpha = 0.6
+  ctx.fillText('SmartMoney AI - Gratis untuk dicoba!', W / 2, 1800)
+  ctx.globalAlpha = 1
+
+  // Save
   const tmpPath = path.join(os.tmpdir(), `share_${Date.now()}.png`)
-  const buffer = canvas.toBuffer('image/png')
-  fs.writeFileSync(tmpPath, buffer)
+  fs.writeFileSync(tmpPath, canvas.toBuffer('image/png'))
   return tmpPath
 }
