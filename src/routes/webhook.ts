@@ -270,6 +270,12 @@ webhook.post('/webhook', async (c) => {
           return c.json({ status: 'ok' })
         }
 
+        // Handler goal setup - input amount
+        if (action.type === 'goal_setup' && action.step === 'ask_amount') {
+          await handleGoalAmount(from, text, user.id, action)
+          return c.json({ status: 'ok' })
+        }
+
         // Clear pending action jika tidak ada yang cocok
         await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
       }
