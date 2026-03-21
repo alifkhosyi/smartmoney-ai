@@ -58,37 +58,55 @@ export async function generateShareCard(data: ShareCardData): Promise<string> {
   ctx.textAlign = 'center'
   ctx.fillText('SmartMoney AI', 220, 120)
 
-  const emojis: Record<ShareCardType, string> = {
-    monthly_save:  '💰',
-    streak:        '🔥',
-    level_up:      '⚡',
-    goal_achieved: '🏆',
+  // Ganti emoji dengan shape karena Linux server tidak support emoji font
+  const typeColors: Record<ShareCardType, string> = {
+    monthly_save:  '#FFD700',
+    streak:        '#FF6B35',
+    level_up:      '#C084FC',
+    goal_achieved: '#86EFAC',
   }
-  ctx.font = '180px sans-serif'
+  const typeSymbols: Record<ShareCardType, string> = {
+    monthly_save:  'Rp',
+    streak:        'STREAK',
+    level_up:      'LEVEL',
+    goal_achieved: 'GOAL',
+  }
+  // Draw colored circle sebagai icon
+  ctx.fillStyle = typeColors[data.type]
+  ctx.globalAlpha = 0.2
+  ctx.beginPath()
+  ctx.arc(width / 2, 460, 160, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.globalAlpha = 1
+  ctx.fillStyle = typeColors[data.type]
+  ctx.font = 'bold 72px sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText(emojis[data.type], width / 2, 560)
+  ctx.fillText(typeSymbols[data.type], width / 2, 490)
 
   ctx.fillStyle = '#ffffff'
   if (data.type === 'monthly_save' && data.value !== undefined) {
-    ctx.font = 'bold 96px sans-serif'
-    ctx.fillText(formatRupiah(data.value), width / 2, 780)
-    ctx.font = 'bold 48px sans-serif'
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.fillText('berhasil aku hemat bulan ini!', width / 2, 860)
-  } else if (data.type === 'streak' && data.streak !== undefined) {
-    ctx.font = 'bold 160px sans-serif'
+    ctx.font = 'bold 88px sans-serif'
     ctx.fillStyle = '#FFD700'
-    ctx.fillText(`${data.streak}`, width / 2, 800)
+    ctx.fillText(formatRupiah(data.value), width / 2, 780)
+    ctx.font = 'bold 44px sans-serif'
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText('hemat bulan ini!', width / 2, 860)
+  } else if (data.type === 'streak' && data.streak !== undefined) {
+    ctx.font = 'bold 200px sans-serif'
+    ctx.fillStyle = '#FF6B35'
+    ctx.fillText(`${data.streak}`, width / 2, 820)
     ctx.font = 'bold 52px sans-serif'
     ctx.fillStyle = '#ffffff'
-    ctx.fillText('hari streak konsisten!', width / 2, 880)
+    ctx.fillText(`HARI KONSISTEN!`, width / 2, 900)
   } else if (data.type === 'level_up' && data.levelName) {
-    ctx.font = 'bold 56px sans-serif'
+    ctx.font = 'bold 80px sans-serif'
     ctx.fillStyle = '#C084FC'
     ctx.fillText('LEVEL UP!', width / 2, 740)
-    ctx.font = 'bold 64px sans-serif'
+    ctx.font = 'bold 56px sans-serif'
     ctx.fillStyle = '#ffffff'
-    ctx.fillText(data.levelName, width / 2, 840)
+    // Hapus emoji dari levelName
+    const cleanLevel = data.levelName.replace(/[^\x00-\x7F]/g, '').trim()
+    ctx.fillText(cleanLevel || data.levelName, width / 2, 840)
   } else if (data.type === 'goal_achieved' && data.goalName && data.value !== undefined) {
     ctx.font = 'bold 52px sans-serif'
     ctx.fillStyle = '#86EFAC'
@@ -101,9 +119,9 @@ export async function generateShareCard(data: ShareCardData): Promise<string> {
     ctx.fillText(data.goalName, width / 2, 900)
   }
 
-  ctx.font = '40px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText(`— ${data.name}`, width / 2, 1020)
+  ctx.font = 'bold 44px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  ctx.fillText(data.name, width / 2, 1020)
 
   const quotes: Record<ShareCardType, string> = {
     monthly_save:  '"Konsistensi adalah kunci kebebasan finansial"',
