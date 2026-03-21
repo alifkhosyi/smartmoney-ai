@@ -10,7 +10,7 @@ import { parseReceiptImage } from '../services/ai/ocr.js'
 import { checkOcrLimit, checkBudgetLimit, getUpsellMessage, PLAN_NAMES } from '../services/planLimits.js'
 import { addXp, formatXpMessage, checkDailyBonus, updateWeeklyChallenge, initWeeklyChallenges } from '../services/xp.js'
 import { generateShareCard } from '../services/shareCard.js'
-import { parseGoalCommand, createGoal, addToGoal, listGoals } from '../services/goals.js'
+import { parseGoalCommand, createGoal, addToGoal, listGoals, showGoalMenu, handleGoalTemplate, handleGoalAmount, handleGoalDeadline, GOAL_TEMPLATES } from '../services/goals.js'
 import { sendImage } from '../services/whatsapp/client.js'
 import * as fs from 'fs'
 
@@ -377,14 +377,29 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // ── Handler template goal dari list reply ──
+      if (buttonId && GOAL_TEMPLATES.find(t => t.id === buttonId)) {
+        await handleGoalTemplate(from, buttonId, user.id)
+        return c.json({ status: 'ok' })
+      }
+
+      // ── Handler goal_dur button ──
+      if (buttonId?.startsWith('goal_dur_') && user.pending_action) {
+        const action = user.pending_action as any
+        if (action.type === 'goal_setup') {
+          const plan = (user.plan || 'free') as string
+          await handleGoalDeadline(from, buttonId, user.id, action, plan)
+          return c.json({ status: 'ok' })
+        }
+      }
+
       // ── Command: goals ──
       const goalCmd = parseGoalCommand(text)
       if (goalCmd.type !== null) {
         const plan = (user.plan || 'free') as string
 
         if (goalCmd.type === 'list') {
-          const msg = await listGoals(user.id)
-          await sendMessage(from, msg)
+          await showGoalMenu(from, plan)
           return c.json({ status: 'ok' })
         }
 
