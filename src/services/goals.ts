@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { sendMessage } from './whatsapp/client.js'
+import { sendMessage, sendList, sendButtons } from './whatsapp/client.js'
 import { addXp, formatXpMessage } from './xp.js'
 
 const supabase = createClient(
@@ -35,6 +35,123 @@ function detectEmoji(name: string): string {
   return '🎯'
 }
 
+export const GOAL_TEMPLATES = [
+  { id: 'goal_liburan',    emoji: '✈️', name: 'Liburan',          contoh: '5.000.000', durasi: '3 bulan' },
+  { id: 'goal_rumah',      emoji: '🏠', name: 'DP Rumah',         contoh: '50.000.000', durasi: '24 bulan' },
+  { id: 'goal_kendaraan',  emoji: '🚗', name: 'Kendaraan',        contoh: '10.000.000', durasi: '12 bulan' },
+  { id: 'goal_nikah',      emoji: '💍', name: 'Pernikahan',       contoh: '30.000.000', durasi: '18 bulan' },
+  { id: 'goal_darurat',    emoji: '🛡️', name: 'Dana Darurat',     contoh: '15.000.000', durasi: '6 bulan' },
+  { id: 'goal_gadget',     emoji: '📱', name: 'Gadget/Elektronik',contoh: '3.000.000',  durasi: '3 bulan' },
+  { id: 'goal_pendidikan', emoji: '🎓', name: 'Pendidikan',       contoh: '20.000.000', durasi: '12 bulan' },
+  { id: 'goal_lainnya',    emoji: '🎯', name: 'Lainnya',          contoh: '5.000.000',  durasi: '6 bulan' },
+]
+
+// Tampilkan menu pilihan goal
+export async function showGoalMenu(phone: string, plan: string) {
+  if (plan === 'free') {
+    await sendMessage(phone,
+      `🎯 *Financial Goals*\n\n` +
+      `Fitur Goals membantu kamu nabung dengan terarah!\n\n` +
+      `⭐ *Upgrade ke Personal* untuk akses Goals\nHanya Rp 29.000/bulan\n\n` +
+      `Ketik *upgrade* untuk info lebih lanjut.`
+    )
+    return
+  }
+
+  await sendList(
+    phone,
+    '🎯 Mau nabung untuk apa? Pilih tujuan kamu:',
+    'Pilih Tujuan',
+    [{
+      title: 'Tujuan Nabung Populer',
+      rows: GOAL_TEMPLATES.map(t => ({
+        id: t.id,
+        title: `${t.emoji} ${t.name}`,
+        description: `Contoh target: Rp ${t.contoh} dalam ${t.durasi}`
+      }))
+    }],
+    '🎯 Pilih Tujuan'
+  )
+}
+
+// Handle setelah user pilih template
+export async function handleGoalTemplate(phone: string, templateId: string, userId: string) {
+  const template = GOAL_TEMPLATES.find(t => t.id === templateId)
+  if (!template) return
+
+  // Simpan pending action untuk tanya target & deadline
+  await supabase.from('users').update({
+    pending_action: {
+      type: 'goal_setup',
+      step: 'ask_amount',
+      goal_name: template.name,
+      goal_emoji: template.emoji,
+    }
+  }).eq('id', userId)
+
+  await sendMessage(phone,
+    `${template.emoji} *${template.name}*\n\n` +
+    `Berapa target yang ingin kamu kumpulkan?\n\n` +
+    `Contoh: _5jt_, _10.000.000_, _500rb_\n\n` +
+    `_(Ketik nominal targetmu)_`
+  )
+}
+
+// Handle input amount setelah pilih template
+export async function handleGoalAmount(phone: string, text: string, userId: string, pendingAction: any) {
+  const amountStr = text.toLowerCase().trim()
+  let amount = 0
+  if (amountStr.includes('jt') || amountStr.includes('juta')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
+  else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
+  else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
+
+  if (!amount || amount <= 0) {
+    await sendMessage(phone, '❌ Nominal tidak valid. Coba lagi, contoh: _5jt_ atau _5000000_')
+    return
+  }
+
+  // Update pending action dengan amount, tanya deadline
+  await supabase.from('users').update({
+    pending_action: {
+      ...pendingAction,
+      step: 'ask_deadline',
+      goal_amount: amount,
+    }
+  }).eq('id', userId)
+
+  await sendButtons(phone,
+    `${pendingAction.goal_emoji} *${pendingAction.goal_name}*\n` +
+    `Target: Rp ${fmt(amount)}\n\n` +
+    `Dalam berapa lama mau tercapai?`,
+    [
+      { id: 'goal_dur_3', title: '3 Bulan' },
+      { id: 'goal_dur_6', title: '6 Bulan' },
+      { id: 'goal_dur_12', title: '12 Bulan' },
+    ]
+  )
+}
+
+// Handle pilihan durasi
+export async function handleGoalDeadline(phone: string, buttonId: string, userId: string, pendingAction: any, plan: string) {
+  const durMap: Record<string, number> = {
+    'goal_dur_3': 3,
+    'goal_dur_6': 6,
+    'goal_dur_12': 12,
+  }
+  const months = durMap[buttonId]
+  if (!months) return
+
+  const deadline = new Date()
+  deadline.setMonth(deadline.getMonth() + months)
+
+  const msg = await createGoal(userId, pendingAction.goal_name, pendingAction.goal_amount, deadline, plan)
+
+  // Clear pending action
+  await supabase.from('users').update({ pending_action: null }).eq('id', userId)
+
+  await sendMessage(phone, msg)
+}
+
 export async function createGoal(
   userId: string,
   name: string,
@@ -42,7 +159,6 @@ export async function createGoal(
   deadlineDate: Date,
   plan: string
 ): Promise<string> {
-  // Cek limit goal berdasarkan plan
   const { count } = await supabase
     .from('goals')
     .select('*', { count: 'exact', head: true })
@@ -57,12 +173,13 @@ export async function createGoal(
   }
 
   if (activeGoals >= maxGoals) {
-    return `⚠️ Kamu sudah punya ${activeGoals} goal aktif (maks ${maxGoals} untuk plan ${plan}).\n\nSelesaikan atau hapus goal yang ada dulu, atau upgrade ke Business untuk goals unlimited.\n\nKetik *goals* untuk lihat goal kamu.`
+    return `⚠️ Kamu sudah punya ${activeGoals} goal aktif (maks ${maxGoals} untuk plan ${plan}).\n\nSelesaikan atau hapus goal yang ada dulu.\n\nKetik *goals* untuk lihat goal kamu.`
   }
 
   const emoji = detectEmoji(name)
   const weeksLeft = getWeeksUntil(deadlineDate)
   const weeklyTarget = Math.ceil(targetAmount / weeksLeft)
+  const deadlineStr = deadlineDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
 
   await supabase.from('goals').insert({
     user_id: userId,
@@ -73,33 +190,24 @@ export async function createGoal(
     emoji,
   })
 
-  const deadlineStr = deadlineDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
-
   return (
     `${emoji} *Goal berhasil dibuat!*\n\n` +
     `📌 ${name}\n` +
     `💰 Target: Rp ${fmt(targetAmount)}\n` +
     `📅 Deadline: ${deadlineStr}\n` +
-    `📆 Sisa waktu: ${weeksLeft} minggu\n` +
+    `📆 Sisa: ${weeksLeft} minggu\n` +
     `💡 Nabung per minggu: Rp ${fmt(weeklyTarget)}\n\n` +
-    `Untuk tambah tabungan, ketik:\n_"nabung ${name.toLowerCase()} 100rb"_`
+    `Untuk nabung, ketik:\n_"nabung ${name.toLowerCase()} 100rb"_\n\nAtau ketik *goals* untuk lihat semua goalmu 🎯`
   )
 }
 
-export async function addToGoal(
-  userId: string,
-  goalKeyword: string,
-  amount: number
-): Promise<string> {
-  // Cari goal yang namanya mirip keyword
+export async function addToGoal(userId: string, goalKeyword: string, amount: number): Promise<string> {
   const { data: goals } = await supabase
-    .from('goals')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('completed', false)
+    .from('goals').select('*')
+    .eq('user_id', userId).eq('completed', false)
 
   if (!goals || goals.length === 0) {
-    return `Belum ada goal aktif. Buat dulu dengan:\n_"nabung liburan bali 5jt dalam 3 bulan"_`
+    return `Belum ada goal aktif. Ketik *goals* untuk buat goal pertamamu! 🎯`
   }
 
   const matched = goals.find(g =>
@@ -110,10 +218,7 @@ export async function addToGoal(
   const newAmount = matched.current_amount + amount
   const completed = newAmount >= matched.target_amount
 
-  await supabase
-    .from('goals')
-    .update({ current_amount: newAmount, completed })
-    .eq('id', matched.id)
+  await supabase.from('goals').update({ current_amount: newAmount, completed }).eq('id', matched.id)
 
   const progress = getProgressBar(newAmount, matched.target_amount)
   const remaining = Math.max(0, matched.target_amount - newAmount)
@@ -125,8 +230,8 @@ export async function addToGoal(
       `🎉 *GOAL TERCAPAI!*\n\n` +
       `${matched.emoji} ${matched.name}\n` +
       `✅ Terkumpul: Rp ${fmt(newAmount)} / Rp ${fmt(matched.target_amount)}\n\n` +
-      `Selamat! Kamu berhasil mencapai goal ini! 🏆\n\n` +
-      `Ketik *share* untuk bagikan pencapaian ini ke story! 📸`
+      `Selamat! Kamu berhasil! 🏆\n\n` +
+      `Ketik *share* untuk bagikan ke story! 📸`
     )
   }
 
@@ -142,16 +247,14 @@ export async function addToGoal(
 
 export async function listGoals(userId: string): Promise<string> {
   const { data: goals } = await supabase
-    .from('goals')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('completed', false)
+    .from('goals').select('*')
+    .eq('user_id', userId).eq('completed', false)
     .order('created_at', { ascending: true })
 
   if (!goals || goals.length === 0) {
     return (
       `🎯 *Goals Kamu*\n\nBelum ada goal aktif.\n\n` +
-      `Buat goal pertamamu:\n_"nabung liburan bali 5jt dalam 3 bulan"_\n_"nabung darurat 10jt dalam 6 bulan"_`
+      `Ketik *goals* lagi untuk mulai buat goal nabungmu! 💪`
     )
   }
 
@@ -163,14 +266,13 @@ export async function listGoals(userId: string): Promise<string> {
       `${g.emoji} *${g.name}*\n` +
       `${progress}\n` +
       `Rp ${fmt(g.current_amount)} / Rp ${fmt(g.target_amount)}\n` +
-      `📅 Deadline: ${deadlineStr} | Sisa: Rp ${fmt(remaining)}`
+      `📅 ${deadlineStr} | Sisa: Rp ${fmt(remaining)}`
     )
   }).join('\n\n')
 
-  return `🎯 *Goals Kamu*\n\n${goalList}\n\nKetik _"nabung [nama goal] [jumlah]"_ untuk menabung`
+  return `🎯 *Goals Kamu*\n\n${goalList}\n\nKetik _"nabung [nama goal] [jumlah]"_ untuk menabung 💰`
 }
 
-// Parse command goal dari teks natural
 export function parseGoalCommand(text: string): {
   type: 'create' | 'add' | 'list' | null
   name?: string
@@ -180,12 +282,10 @@ export function parseGoalCommand(text: string): {
 } {
   const lower = text.toLowerCase().trim()
 
-  // List goals
   if (lower === 'goals' || lower === 'goal' || lower === 'tabungan') {
     return { type: 'list' }
   }
 
-  // Tambah ke goal: "nabung bali 100rb" atau "tabung darurat 500rb"
   const addMatch = lower.match(/^(?:nabung|tabung|setor)\s+(.+?)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)$/i)
   if (addMatch) {
     const keyword = addMatch[1].trim()
@@ -194,11 +294,9 @@ export function parseGoalCommand(text: string): {
     if (amountStr.includes('jt') || amountStr.includes('juta')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
     else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
     else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
-
     if (amount > 0) return { type: 'add', keyword, amount }
   }
 
-  // Buat goal: "nabung liburan bali 5jt dalam 3 bulan"
   const createMatch = lower.match(/^(?:nabung|goal|target|mau nabung)\s+(.+?)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)\s+(?:dalam|selama)\s+(\d+)\s+(bulan|minggu|tahun)$/i)
   if (createMatch) {
     const name = createMatch[1].trim()
@@ -207,14 +305,12 @@ export function parseGoalCommand(text: string): {
     if (amountStr.includes('jt') || amountStr.includes('juta')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000000
     else if (amountStr.includes('rb') || amountStr.includes('ribu') || amountStr.includes('k')) amount = parseFloat(amountStr.replace(/[^\d.]/g, '')) * 1000
     else amount = parseFloat(amountStr.replace(/[^\d.]/g, ''))
-
     const duration = parseInt(createMatch[3])
     const unit = createMatch[4]
     const deadline = new Date()
     if (unit === 'bulan') deadline.setMonth(deadline.getMonth() + duration)
     else if (unit === 'minggu') deadline.setDate(deadline.getDate() + duration * 7)
     else if (unit === 'tahun') deadline.setFullYear(deadline.getFullYear() + duration)
-
     if (amount > 0) return { type: 'create', name, amount, deadline }
   }
 
