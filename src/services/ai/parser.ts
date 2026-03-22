@@ -144,3 +144,58 @@ Tulis insight 1-2 kalimat yang:
     return ''
   }
 }
+
+export async function handleConversation(
+  text: string,
+  userName?: string,
+  recentTransactions?: { type: string; amount: number; category: string; description: string }[]
+): Promise<string | null> {
+  const lower = text.toLowerCase().trim()
+  
+  // Deteksi apakah ini percakapan biasa (bukan transaksi)
+  const conversationalPatterns = [
+    /^(halo|hai|hi|hey|hei|pagi|siang|malam|selamat)/,
+    /^(makasih|terima kasih|thanks|thank you)/,
+    /^(oke|ok|siap|iya|ya|yep|yoi|sip)/,
+    /^(gimana|bagaimana|apa kabar|how are you)/,
+    /^(keren|bagus|mantap|good|nice|wow|hebat)/,
+    /^(cape|lelah|stress|sedih|senang|happy)/,
+    /^(gue|aku|saya).{0,20}(mau|lagi|baru|udah|sudah)/,
+  ]
+  
+  const isConversational = conversationalPatterns.some(p => p.test(lower))
+  
+  // Kalau ada angka, kemungkinan transaksi — jangan handle sebagai chat
+  const hasNumber = /\d/.test(text)
+  if (hasNumber && !isConversational) return null
+  if (!isConversational) return null
+
+  const nama = userName || 'Sobat'
+  const txSummary = recentTransactions?.slice(0, 3)
+    .map(t => `${t.type === 'income' ? '+' : '-'}${t.amount} ${t.category}`)
+    .join(', ') || 'belum ada'
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 150,
+    messages: [{
+      role: 'user',
+      content: `Kamu adalah SmartMoney AI, financial advisor pribadi yang hangat dan friendly via WhatsApp. Seperti sahabat yang kebetulan ahli keuangan.
+
+Nama user: ${nama}
+Pesan user: "${text}"
+3 transaksi terakhir: ${txSummary}
+
+Balas dengan:
+1. Respon natural dan hangat terhadap pesannya (1 kalimat)
+2. Gentle redirect ke pencatatan keuangan (1 kalimat, tidak memaksa)
+
+Contoh output:
+"Halo ${nama}! Semoga harimu menyenangkan 😊 Kalau ada pengeluaran hari ini, langsung ketik aja ya biar aku catat!"
+
+Bahasa Indonesia santai, max 2 kalimat, 1-2 emoji. JANGAN terlalu formal.`
+    }]
+  })
+
+  return response.content[0].type === 'text' ? response.content[0].text.trim() : null
+}

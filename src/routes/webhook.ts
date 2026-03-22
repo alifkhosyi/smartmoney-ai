@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { sendMessage, markAsRead, sendButtons, sendList } from '../services/whatsapp/client.js'
-import { parseTransaction, parseTransactions, generateInsight } from '../services/ai/parser.js'
+import { parseTransaction, parseTransactions, generateInsight, handleConversation } from '../services/ai/parser.js'
 import { quickParse } from '../services/ai/quickParser.js'
 import { isTrialActive, isTrialExpired, getTrialDaysLeft, sendTrialExpiredMessage } from '../services/trial.js'
 import { supabase } from '../lib/supabase.js'
@@ -700,6 +700,14 @@ Coba gratis via WhatsApp!`
         } else {
           await sendMessage(from, 'Format budget salah. Coba: "budget makan 500rb"')
         }
+        return c.json({ status: 'ok' })
+      }
+
+      // ── Conversational handler (sebelum parsing transaksi) ──
+      const { data: recentTxConv } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(3)
+      const convReply = await handleConversation(text, user.name || undefined, recentTxConv || [])
+      if (convReply) {
+        await sendMessage(from, convReply)
         return c.json({ status: 'ok' })
       }
 
