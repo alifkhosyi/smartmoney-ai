@@ -93,14 +93,11 @@ export async function addXp(userId: string, type: keyof typeof XP_REWARDS, custo
 }
 
 export function formatXpMessage(result: XpResult): string {
-  let msg = `\n⚡ *+${result.xpGained} XP* (Total: ${result.totalXp} XP)`
+  // Hanya tampilkan kalau level up atau milestone — tidak setiap transaksi
+  let msg = ''
 
   if (result.leveledUp) {
     msg += `\n\n🎉 *LEVEL UP!* Kamu sekarang ${result.levelName}!`
-  }
-
-  if (result.nextLevelName && result.xpToNext > 0) {
-    msg += `\n📊 ${result.xpToNext} XP lagi ke ${result.nextLevelName}`
   }
 
   if (result.milestone) {
