@@ -102,32 +102,49 @@ export async function handleOnboarding(user: any, text: string, from: string, bu
     const { data: updatedUser } = await supabase.from('users').select('name').eq('id', user.id).single()
     const name = updatedUser?.name || 'Kamu'
 
-    await sendList(
-      from,
-      `Pilihan yang tepat, *${name}!* 💪\n\nSatu lagi — kira-kira berapa *penghasilan bulanan* kamu? Ini membantu aku memberikan saran yang lebih personal untukmu.`,
-      'Pilih Kisaran',
-      [{
-        title: 'Penghasilan Bulanan',
-        rows: [
-          { id: 'income_1', title: '< Rp 3 juta', description: 'Di bawah 3 juta per bulan' },
-          { id: 'income_2', title: 'Rp 3 – 5 juta', description: 'Antara 3 sampai 5 juta' },
-          { id: 'income_3', title: 'Rp 5 – 10 juta', description: 'Antara 5 sampai 10 juta' },
-          { id: 'income_4', title: 'Rp 10 – 20 juta', description: 'Antara 10 sampai 20 juta' },
-          { id: 'income_5', title: '> Rp 20 juta', description: 'Di atas 20 juta per bulan' },
-          { id: 'income_skip', title: '🙈 Lewati', description: 'Tidak ingin berbagi info ini' },
-        ]
-      }],
-      '💰 Penghasilan Bulanan',
-      'Informasi ini hanya digunakan untuk saran personal'
+    // Respon hangat acknowledge pilihan user
+    const goalParts = goal.split(',').map((g: string) => g.trim())
+    const goalSummary = goalParts.length > 1
+      ? `*${goalParts.length} tujuan* sekaligus`
+      : `tujuan *${goal.trim()}*`
+
+    await sendMessage(from,
+      `Luar biasa, *${name}!* 🌟\n\nKamu punya ${goalSummary} — itu langkah pertama yang keren banget! Banyak orang tidak pernah sampai di tahap ini. Aku bangga kamu sudah mulai! 💪\n\nSekarang satu pertanyaan lagi ya — *berapa penghasilan bulanan kamu?*\n\nKetik nominalnya langsung, contoh:\n• *5000000*\n• *5jt*\n• *5.000.000*\n\nAtau ketik *skip* kalau tidak ingin berbagi 😊`
     )
     return true
   }
 
-  // Step 3: Simpan penghasilan + tutorial catat pertama
+  // Step 3: Simpan penghasilan manual + tutorial catat pertama
   if (step === 3) {
-    const incomeId = buttonId
-    const incomeData = incomeId ? INCOME_OPTIONS[incomeId] : null
-    const income = incomeData?.amount || 0
+    let income = 0
+    const input = (text || '').toLowerCase().trim()
+
+    if (input === 'skip' || input === 'lewati' || input === 'tidak') {
+      income = 0
+    } else if (buttonId && INCOME_OPTIONS[buttonId]) {
+      // fallback kalau masih ada list reply
+      income = INCOME_OPTIONS[buttonId].amount
+    } else {
+      // Parse input manual
+      const clean = input.replace(/rp\.?\s*/g, '').replace(/,/g, '.').replace(/\s+/g, '')
+      const num = parseFloat(clean.replace(/[^\d.]/g, ''))
+      if (clean.includes('miliar') || clean.includes('mld')) income = num * 1000000000
+      else if (clean.includes('juta') || clean.includes('jt')) income = num * 1000000
+      else if (clean.includes('ribu') || clean.includes('rb') || clean.includes('k')) income = num * 1000
+      else income = num || 0
+    }
+
+    // Kalau tidak bisa parse dan bukan skip, minta ulang
+    if (income === 0 && input !== 'skip' && input !== 'lewati' && input !== 'tidak' && input.length > 0 && !['skip','lewati','tidak'].includes(input)) {
+      const fmt2 = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+      // Cek apakah memang 0 atau tidak bisa diparsing
+      if (isNaN(parseFloat(input.replace(/[^\d.]/g, '')))) {
+        await sendMessage(from,
+          `Hmm, aku kurang paham formatnya. Coba ketik seperti ini ya:\n• *5000000*\n• *5jt*\n• *5.000.000*\n\nAtau ketik *skip* kalau tidak mau berbagi 😊`
+        )
+        return true
+      }
+    }
 
     await supabase.from('users').update({ monthly_income: income || null, onboarding_step: 4 }).eq('id', user.id)
 
@@ -135,13 +152,23 @@ export async function handleOnboarding(user: any, text: string, from: string, bu
     const name = updatedUser?.name || 'Kamu'
     const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
 
-    let tipText = ''
+    let responseMsg = ''
     if (income > 0) {
-      tipText = `\n\n💡 *Saran alokasi (50/30/20):*\n• 🏠 Kebutuhan: Rp ${fmt(Math.round(income * 0.5))}\n• 🎉 Keinginan: Rp ${fmt(Math.round(income * 0.3))}\n• 💰 Tabungan: Rp ${fmt(Math.round(income * 0.2))}\n`
+      const tabungan = Math.round(income * 0.2)
+      const kebutuhan = Math.round(income * 0.5)
+      const keinginan = Math.round(income * 0.3)
+      responseMsg = `Noted! Penghasilan *Rp ${fmt(income)}/bulan* ya ${name} 📝\n\n` +
+        `Berdasarkan penghasilanmu, ini saran alokasi ideal *50/30/20*:\n` +
+        `🏠 Kebutuhan: *Rp ${fmt(kebutuhan)}*\n` +
+        `🎉 Gaya hidup: *Rp ${fmt(keinginan)}*\n` +
+        `💰 Tabungan & investasi: *Rp ${fmt(tabungan)}*\n\n` +
+        `Dengan SmartMoney AI, kita akan pantau bareng supaya kamu bisa capai angka ini! 🎯\n\n`
+    } else {
+      responseMsg = `Oke ${name}, tidak apa-apa! Kita tetap bisa bantu kamu kelola keuangan dengan baik! 😊\n\n`
     }
 
     await sendMessage(from,
-      `Siap, *${name}!* ${income > 0 ? tipText + '\n' : ''}Sekarang saatnya *mencoba catat transaksi pertamamu!* 🎯\n\nCaranya gampang banget, cukup ketik seperti percakapan biasa:\n\n💬 *"makan siang 35rb"*\n💬 *"beli kopi 20k"*\n💬 *"gajian 5jt"*\n💬 *"bayar listrik 200rb"*\n\nYuk coba sekarang! Ketik transaksimu 👇`
+      `${responseMsg}Sekarang saatnya *mencoba catat transaksi pertamamu!* \n\nCaranya gampang banget, cukup ketik seperti ngobrol biasa:\n\n💬 *"makan siang 35rb"*\n💬 *"beli kopi 20k"*\n💬 *"gajian 5jt"*\n💬 *"bayar listrik 200rb"*\n\nAku siap mencatat! Yuk coba sekarang 👇`
     )
     return true
   }
@@ -155,7 +182,7 @@ export async function handleOnboarding(user: any, text: string, from: string, bu
 
     setTimeout(async () => {
       await sendMessage(from,
-        `🎉 *Yeay! Transaksi pertama berhasil, ${name}!*\n\nKamu udah mulai perjalanan finansialmu yang lebih baik! 🚀\n\nIni semua yang bisa kamu lakukan:\n\n*📊 Cek Laporan:*\n• *saldo* — ringkasan keuangan\n• *hari ini* — transaksi hari ini\n• *minggu ini* — laporan mingguan\n• *bulan ini* — laporan bulanan\n• *riwayat* — 5 transaksi terakhir\n\n*🎯 Kelola Budget:*\n• *"budget makan 500rb"* — set batas\n• *budget* — lihat semua budget\n\n*👤 Lainnya:*\n• *profil* — streak & badge kamu\n• *bantuan* — menu lengkap\n• *upgrade* — fitur premium\n\n🔥 Streak kamu dimulai hari ini! Catat setiap hari untuk jaga streak-mu!`
+        `🎉 *Yes! Transaksi pertama berhasil, ${name}!*\n\nIni momen yang berarti — kamu baru saja mengambil langkah pertama menuju kebebasan finansial! Banyak orang berencana tapi tidak pernah mulai. Kamu sudah mulai! 🌟\n\nAku akan selalu ada di sini menemanimu, ${name}. Setiap transaksi yang kamu catat adalah investasi untuk masa depanmu sendiri! 💪\n\n*Ini yang bisa kita lakukan bersama:*\n\n📊 *Laporan:* saldo, hari ini, minggu ini, bulan ini, riwayat\n🎯 *Budget:* "budget makan 500rb"\n📸 *Foto struk:* kirim foto nota langsung dicatat\n🎯 *Goals:* ketik "goals" untuk nabung terarah\n👤 *Profil:* lihat streak & badge kamu\n\n🔥 Streak-mu dimulai hari ini! Catat setiap hari ya ${name}, aku akan selalu ingatkan kalau kamu lupa! 😊`
       )
     }, 3000)
 
