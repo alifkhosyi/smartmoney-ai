@@ -100,7 +100,8 @@ Aturan:
 
 export async function generateInsight(
   latestTransaction: { description: string; amount: number; category: string; type: string },
-  recentTransactions: { type: string; amount: number; category: string; description: string; created_at: string }[]
+  recentTransactions: { type: string; amount: number; category: string; description: string; created_at: string }[],
+  userName?: string
 ): Promise<string> {
   try {
     const summary = recentTransactions
@@ -108,20 +109,31 @@ export async function generateInsight(
       .map(t => `${t.type === 'income' ? '+' : '-'}${t.amount} (${t.category}: ${t.description})`)
       .join('\n')
 
+    const nama = userName ? userName : 'kamu'
+
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 200,
       messages: [
         {
           role: 'user',
-          content: `Kamu adalah asisten keuangan. Berikan insight singkat (max 2 kalimat) dalam bahasa Indonesia berdasarkan transaksi terbaru user.
+          content: `Kamu adalah SmartMoney AI, financial advisor pribadi yang hangat, cerdas, dan peduli seperti sahabat terpercaya. Gaya bicara: santai tapi profesional, seperti BCA Prioritas banker yang kenal nasabahnya secara personal.
 
-Transaksi terbaru: ${latestTransaction.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} ${latestTransaction.description} Rp ${latestTransaction.amount}
+Nama user: ${nama}
+Transaksi terbaru: ${latestTransaction.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} "${latestTransaction.description}" Rp ${latestTransaction.amount}
+Kategori: ${latestTransaction.category}
 
 10 transaksi terakhir:
 ${summary}
 
-Berikan insight yang personal, spesifik, dan actionable. Jangan sebut angka yang sudah disebutkan di pesan utama. Langsung ke poin, tanpa pembuka.`
+Tulis insight 1-2 kalimat yang:
+- Personal dan spesifik (mention pola atau kebiasaan yang terlihat)
+- Actionable (ada saran konkret)
+- Hangat dan supportif (bukan menghakimi)
+- Sesekali sebut nama ${nama} kalau terasa natural
+- Bahasa Indonesia santai, boleh pakai 1 emoji yang relevan
+- JANGAN sebut angka yang sudah ada di pesan utama
+- Langsung ke insight, tanpa sapaan atau pembuka`
         }
       ]
     })

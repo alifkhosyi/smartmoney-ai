@@ -534,7 +534,11 @@ Coba gratis via WhatsApp!`
         const income = transactions?.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0) || 0
         const expense = transactions?.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0) || 0
         const fmt = (n: number) => new Intl.NumberFormat('id-ID').format(n)
-        await sendMessage(from, `💰 *Ringkasan Keuangan*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(income - expense)}`)
+        const namaSaldo = user.name ? `${user.name}` : 'Kamu'
+        const saldoMsg = income - expense >= 0 
+          ? `\n\n💚 Bagus! ${namaSaldo} masih surplus bulan ini. Pertahankan ya!`
+          : `\n\n💛 ${namaSaldo}, pengeluaran melebihi pemasukan. Yuk kita review bersama!`
+        await sendMessage(from, `💰 *Ringkasan Keuangan ${user.name ? user.name : ''}*\n\n📈 Pemasukan: Rp ${fmt(income)}\n📉 Pengeluaran: Rp ${fmt(expense)}\n💵 Saldo: Rp ${fmt(income - expense)}${saldoMsg}`)
         return c.json({ status: 'ok' })
       }
 
@@ -659,7 +663,8 @@ Coba gratis via WhatsApp!`
       console.log('Parsed:', parseResult)
 
       if (!parseResult.transactions.length || parseResult.transactions[0].type === 'unknown' || parseResult.transactions[0].amount === 0) {
-        await sendMessage(from, 'Hmm, aku kurang paham. Coba ketik:\n- "makan 25rb"\n- "gaji 5jt"\n- "beli kopi 15rb, bensin 50rb, makan siang 25rb"\n\nAtau ketik *bantuan* untuk lihat menu.')
+        const sapaanBingung = user.name ? `Hmm, ${user.name}, ` : 'Hmm, '
+        await sendMessage(from, `${sapaanBingung}aku belum paham maksudnya. Coba ketik:\n- "makan 25rb"\n- "gaji 5jt"\n- "beli kopi 15rb, bensin 50rb, makan siang 25rb"\n\nAtau ketik *bantuan* untuk lihat semua fitur ya! 😊`)
         return c.json({ status: 'ok' })
       }
 
@@ -735,8 +740,12 @@ Coba gratis via WhatsApp!`
           }
         }
         const { data: recentTx } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
-        const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [])
-        await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${budgetAlert}${badgeText}${insight ? `\n\n💡 *Insight:* ${insight}` : ''}${xpText}${bonusXpText}`)
+        const insight = await generateInsight({ description: parsed.description, amount: parsed.amount, category: parsed.category, type: parsed.type }, recentTx || [], user.name || undefined)
+        // Sapaan personal berdasarkan streak dan konteks
+      const greeting = user.name ? `${user.name}, ` : ''
+      const motivasi = streak >= 7 ? `\n🔥 Keren banget ${user.name || 'kamu'}, streak ${streak} hari!` : streak >= 3 ? `\n⚡ Konsisten terus ya ${user.name || ''}!`.trim() : ''
+      
+      await sendMessage(from, `${parsed.type === 'income' ? '💰' : '💸'} *${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n📝 ${parsed.description}\n🏷️ ${parsed.category}\n💵 Rp ${fmt(parsed.amount)}\n👛 ${parsed.wallet}${streakText}${motivasi}${budgetAlert}${badgeText}${insight ? `\n\n💡 ${insight}` : ''}${xpText}${bonusXpText}`)
       }
 
     } catch (err) {
