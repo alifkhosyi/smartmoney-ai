@@ -38,31 +38,64 @@ export async function handleOnboarding(user: any, text: string, from: string, bu
 
     await supabase.from('users').update({ name: capitalName, onboarding_step: 2 }).eq('id', user.id)
 
-    await sendList(
-      from,
-      `Senang kenalan sama kamu, *${capitalName}!* 🎉\n\nAku mau bantu kamu capai tujuan finansialmu. Sekarang, apa *tujuan keuangan utama* kamu?`,
-      'Pilih Tujuan',
-      [{
-        title: 'Tujuan Finansialku',
-        rows: [
-          { id: 'goal_saving', title: '💰 Nabung lebih banyak', description: 'Sisihkan lebih banyak dari penghasilan' },
-          { id: 'goal_control', title: '📊 Kontrol pengeluaran', description: 'Tahu kemana uang pergi setiap bulan' },
-          { id: 'goal_target', title: '🎯 Capai target finansial', description: 'Punya target dan lacak progressnya' },
-          { id: 'goal_debt', title: '💳 Bebas dari hutang', description: 'Lunasi hutang lebih cepat' },
-          { id: 'goal_asset', title: '🏠 Beli aset', description: 'Rumah, kendaraan, atau investasi' },
-          { id: 'goal_all', title: '🌟 Semua tujuan di atas', description: 'Aku mau semua!' },
-        ]
-      }],
-      '🎯 Pilih Tujuan Finansial',
-      'Pilih yang paling sesuai dengan kondisimu sekarang'
+    await sendMessage(from,
+      `Senang kenalan sama kamu, *${capitalName}!* 🎉\n\nAku mau bantu kamu capai tujuan finansialmu. *Apa tujuan keuangan kamu?*\n\n1️⃣ 💰 Nabung lebih banyak\n2️⃣ 📊 Kontrol pengeluaran\n3️⃣ 🎯 Capai target finansial\n4️⃣ 💳 Bebas dari hutang\n5️⃣ 🏠 Beli aset (rumah/kendaraan)\n6️⃣ 📈 Investasi & kembangkan uang\n7️⃣ 👨‍👩‍👧 Kebutuhan keluarga\n8️⃣ 💼 Modal usaha/bisnis\n\n✏️ *Boleh pilih lebih dari satu!*\nContoh: ketik *1,3,5* atau *nabung dan investasi*\n\nAtau ketik tujuanmu sendiri jika tidak ada di list! 😊`
     )
     return true
   }
 
-  // Step 2: Simpan tujuan + tanya penghasilan via List Message
+  // Step 2: Simpan tujuan (multi-pilih) + tanya penghasilan
   if (step === 2) {
-    const goalId = buttonId
-    const goal = goalId && GOALS[goalId] ? GOALS[goalId] : text.trim()
+    let goal = ''
+
+    // Kalau dari list reply (pilih satu dari list)
+    if (buttonId && GOALS[buttonId]) {
+      goal = GOALS[buttonId]
+    } else if (text.trim()) {
+      // User ketik sendiri atau ketik angka multi-pilih
+      const input = text.trim()
+      
+      // Cek apakah input berupa angka/kombinasi angka (misal: 1,2,3 atau 1 3 5)
+      const GOAL_LIST = [
+        '💰 Nabung lebih banyak',
+        '📊 Kontrol pengeluaran', 
+        '🎯 Capai target finansial',
+        '💳 Bebas dari hutang',
+        '🏠 Beli aset (rumah/kendaraan)',
+        '📈 Investasi & kembangkan uang',
+        '👨‍👩‍👧 Kebutuhan keluarga',
+        '💼 Modal usaha/bisnis',
+      ]
+      
+      const numbers = input.match(/\d+/g)
+      if (numbers) {
+        const chosen = numbers
+          .map(n => parseInt(n))
+          .filter(n => n >= 1 && n <= GOAL_LIST.length)
+          .map(n => GOAL_LIST[n - 1])
+        
+        if (chosen.length > 0) {
+          goal = chosen.join(', ')
+          // Cek apakah ada tambahan teks selain angka
+          const extraText = input.replace(/[\d,;\s]+/g, '').trim()
+          if (extraText) goal += `, ${extraText}`
+        } else {
+          // Angka tidak valid, anggap teks bebas
+          goal = input
+        }
+      } else {
+        // Teks bebas langsung disimpan
+        goal = input
+      }
+    }
+
+    // Kalau masih kosong, minta ulang
+    if (!goal) {
+      await sendMessage(from,
+        `Hmm, aku belum tangkap pilihanmu. Ketik nomor pilihanmu ya, contoh: *1,3* atau *2* \n\nAtau ketik tujuanmu langsung dalam kalimat! 😊`
+      )
+      return true
+    }
 
     await supabase.from('users').update({ financial_goal: goal, onboarding_step: 3 }).eq('id', user.id)
 
