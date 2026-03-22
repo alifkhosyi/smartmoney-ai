@@ -62,12 +62,13 @@ serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
   startWeeklyCron()
 
   // Cek trial reminder setiap hari jam 10:00 WIB
-  const cron = await import('node-cron')
-  cron.default.schedule('0 3 * * *', async () => {
-    console.log('[Trial] Cron triggered!')
-    await checkTrialReminders()
-  }, { timezone: 'Asia/Jakarta' })
-  console.log('[Trial] Cron scheduled — setiap hari 10:00 WIB')
+  import('node-cron').then(cron => {
+    cron.default.schedule('0 3 * * *', async () => {
+      console.log('[Trial] Cron triggered!')
+      await checkTrialReminders()
+    }, { timezone: 'Asia/Jakarta' })
+    console.log('[Trial] Cron scheduled — setiap hari 10:00 WIB')
+  })
 })
 
 export default app
