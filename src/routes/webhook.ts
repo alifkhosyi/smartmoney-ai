@@ -338,7 +338,7 @@ webhook.post('/webhook', async (c) => {
       }
 
       // ── Command: edit ──
-      if (cmd === 'edit' || cmd === 'edit terakhir' || cmd?.startsWith('edit ')) {
+      if (cmd === 'edit' || cmd === 'edit terakhir' || cmd?.startsWith('edit ') || cmd?.startsWith('rubah ') || cmd?.startsWith('ubah ') || cmd?.startsWith('ganti ')) {
         const { data: transactions } = await supabase
           .from('transactions').select('*').eq('user_id', user.id)
           .order('created_at', { ascending: false }).limit(5)
@@ -346,6 +346,31 @@ webhook.post('/webhook', async (c) => {
         if (!transactions || transactions.length === 0) {
           await sendMessage(from, 'Belum ada transaksi yang bisa diedit.')
           return c.json({ status: 'ok' })
+        }
+
+        // Edit dengan keyword: "edit sepatu jadi 200k" atau "rubah kaos kaki jadi 10k"
+        const editKwMatch = cmd?.match(/^(?:edit|rubah|ubah|ganti)\s+(.+?)\s+(?:jadi|ke|menjadi)\s+([\d,.]+\s*(?:rb|ribu|jt|juta|k)?)$/i)
+        if (editKwMatch) {
+          const kw = editKwMatch[1].trim()
+          const kwAmountStr = editKwMatch[2].toLowerCase()
+          let kwAmount = 0
+          if (kwAmountStr.includes('jt') || kwAmountStr.includes('juta')) kwAmount = parseFloat(kwAmountStr.replace(/[^\d.]/g, '')) * 1000000
+          else if (kwAmountStr.includes('rb') || kwAmountStr.includes('ribu') || kwAmountStr.includes('k')) kwAmount = parseFloat(kwAmountStr.replace(/[^\d.]/g, '')) * 1000
+          else kwAmount = parseFloat(kwAmountStr.replace(/[^\d.]/g, ''))
+
+          if (kwAmount > 0) {
+            const kwMatched = transactions.find((t: any) =>
+              t.description?.toLowerCase().includes(kw.toLowerCase()) ||
+              kw.toLowerCase().includes(t.description?.toLowerCase().split(' ')[0])
+            ) || transactions[0]
+            const fmtKw = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+            await sendButtons(from,
+              `Update transaksi ini?\n\n${kwMatched.type === 'income' ? '💰' : '💸'} *${kwMatched.description}*\n💵 Rp ${fmtKw(kwMatched.amount)} → Rp ${fmtKw(kwAmount)}`,
+              [{ id: 'confirm_yes', title: '✅ Ya, Update' }, { id: 'confirm_no', title: '↩️ Batal' }]
+            )
+            await supabase.from('users').update({ pending_action: { type: 'confirm_edit', tx_id: kwMatched.id, new_amount: kwAmount } }).eq('id', user.id)
+            return c.json({ status: 'ok' })
+          }
         }
 
         // Edit terakhir dengan nominal langsung: "edit 50rb"
