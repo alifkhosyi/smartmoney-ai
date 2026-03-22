@@ -708,17 +708,18 @@ Coba gratis via WhatsApp!`
       const knownCommands = ['saldo', 'balance', 'riwayat', 'history', 'hari ini', 'today', 'minggu ini', 'weekly', 'bulan ini', 'monthly', 'budget', 'profil', 'profile', 'bantuan', 'help', 'upgrade', 'premium', 'bayar', 'hapus', 'delete', 'edit', 'goals', 'goal', 'tabungan', 'share', 'bagikan']
       const isKnownCmd = knownCommands.includes(text?.toLowerCase().trim()) || !!buttonId || !text?.trim()
       
+      console.log('[Conv] isKnownCmd:', isKnownCmd, 'text:', text)
       if (!isKnownCmd) {
         try {
           const { data: recentTxConv } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(3)
           const convReply = await handleConversation(text, user.name || undefined, recentTxConv || [])
+          console.log('[Conv] reply:', convReply)
           if (convReply) {
             await sendMessage(from, convReply)
             return c.json({ status: 'ok' })
           }
         } catch (convErr) {
           console.error('[Conv] Error:', convErr)
-          // Lanjut ke parsing transaksi kalau conv handler error
         }
       }
 
