@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { sendMessage, markAsRead, sendButtons, sendList } from '../services/whatsapp/client.js'
 import { parseTransaction, parseTransactions, generateInsight } from '../services/ai/parser.js'
 import { quickParse } from '../services/ai/quickParser.js'
+import { isTrialActive, isTrialExpired, getTrialDaysLeft, sendTrialExpiredMessage } from '../services/trial.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
@@ -109,6 +110,17 @@ webhook.post('/webhook', async (c) => {
       if (isOnboarding(user)) {
         const handled = await handleOnboarding(user, text, from, buttonId)
         if (handled) return c.json({ status: 'ok' })
+      }
+
+      // ── Trial expired check ──
+      if (isTrialExpired(user) && user.plan === 'free') {
+        // Kalau command upgrade, biarkan lanjut
+        const cmd2 = text?.toLowerCase().trim()
+        const isUpgradeCmd = cmd2 === 'upgrade' || cmd2 === 'premium' || cmd2 === 'bayar' || buttonId === 'upgrade_now' || buttonId === 'use_free'
+        if (!isUpgradeCmd) {
+          await sendTrialExpiredMessage(from, user.name || 'Sobat')
+          return c.json({ status: 'ok' })
+        }
       }
 
       // ── Handle image: OCR struk ──
@@ -384,6 +396,31 @@ webhook.post('/webhook', async (c) => {
         return c.json({ status: 'ok' })
       }
 
+      // ── Handler trial upgrade buttons ──
+      if (buttonId === 'upgrade_now') {
+        const personalUrl = await createPaymentLink(user.id, from, 'personal')
+        const businessUrl = await createPaymentLink(user.id, from, 'business')
+        await sendMessage(from,
+          `🚀 *Pilih paket yang sesuai, ${user.name || 'Sobat'}!*\n\n` +
+          `⭐ *Personal — Rp 29.000/bulan*\n` +
+          `✅ Riwayat unlimited\n✅ OCR unlimited\n✅ Budget unlimited\n✅ 3 Goals\n✅ Laporan PDF\n` +
+          `👉 ${personalUrl}\n\n` +
+          `👑 *Business — ~~Rp 99.000~~ Rp 49.000/bulan*\n` +
+          `✅ Semua Personal + Excel, laporan pajak, goals unlimited\n` +
+          `👉 ${businessUrl}\n\n` +
+          `_Link berlaku 24 jam. Fitur aktif otomatis setelah bayar!_ 🎉`
+        )
+        return c.json({ status: 'ok' })
+      }
+
+      if (buttonId === 'use_free') {
+        await sendMessage(from,
+          `Oke ${user.name || 'Sobat'}! Kamu tetap bisa pakai SmartMoney AI versi gratis.\n\n` +
+          `Kalau suatu saat mau upgrade, ketik *upgrade* ya! 😊`
+        )
+        return c.json({ status: 'ok' })
+      }
+
       // ── Handler template goal dari list reply ──
       if (buttonId && GOAL_TEMPLATES.find(t => t.id === buttonId)) {
         await handleGoalTemplate(from, buttonId, user.id)
@@ -513,11 +550,18 @@ Coba gratis via WhatsApp!`
           return c.json({ status: 'ok' })
         }
 
-        // User gratis — tampilkan 2 pilihan
+        // User gratis — cek trial status
+        const trialActive = isTrialActive(user)
+        const daysLeft = user.trial_until ? getTrialDaysLeft(user.trial_until) : 0
+        const trialInfo = trialActive 
+          ? `\n⏰ *Trial kamu: ${daysLeft} hari lagi*\n`
+          : ''
+
+        // Tampilkan 2 pilihan upgrade
         const personalUrl = await createPaymentLink(user.id, from, 'personal')
         const businessUrl = await createPaymentLink(user.id, from, 'business')
         await sendMessage(from,
-          `🚀 *Upgrade SmartMoney AI*\n\n` +
+          `🚀 *Upgrade SmartMoney AI*\n${trialInfo}\n` +
           `⭐ *Personal — Rp 29.000/bulan*\n` +
           `✅ Riwayat unlimited\n✅ OCR struk unlimited\n✅ Budget unlimited\n✅ 3 Goals nabung\n✅ Laporan PDF\n✅ Streak freeze 1x\n✅ Komisi referral 20%\n` +
           `👉 ${personalUrl}\n\n` +

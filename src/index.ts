@@ -4,6 +4,7 @@ import { config } from 'dotenv'
 import webhook from './routes/webhook.js'
 import { supabase } from './lib/supabase.js'
 import { startReminderCron } from './services/reminder.js'
+import { checkTrialReminders } from './services/trial.js'
 import { startWeeklyCron } from './services/weeklyReport.js'
 
 config()
@@ -45,6 +46,12 @@ app.get('/admin/test-weekly-report', async (c) => {
   return c.json({ success: true, message: 'Laporan mingguan terkirim!' })
 })
 
+app.get('/admin/test-trial-reminder', async (c) => {
+  const { checkTrialReminders } = await import('./services/trial.js')
+  await checkTrialReminders()
+  return c.json({ success: true, message: 'Trial reminder dicek!' })
+})
+
 app.route('/', webhook)
 
 const port = Number(process.env.PORT) || 3000
@@ -53,6 +60,14 @@ serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
   console.log(`SmartMoney AI running on port ${port}`)
   startReminderCron()
   startWeeklyCron()
+
+  // Cek trial reminder setiap hari jam 10:00 WIB
+  const cron = await import('node-cron')
+  cron.default.schedule('0 3 * * *', async () => {
+    console.log('[Trial] Cron triggered!')
+    await checkTrialReminders()
+  }, { timezone: 'Asia/Jakarta' })
+  console.log('[Trial] Cron scheduled — setiap hari 10:00 WIB')
 })
 
 export default app
