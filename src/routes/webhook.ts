@@ -367,12 +367,8 @@ webhook.post('/webhook', async (c) => {
                 { id: 'confirm_no', title: '↩️ Batal' }
               ]
             )
-            // Store proper edit action
-            await supabase.from('users').update({ pending_action: { type: 'confirm_edit', tx_id: tx.id, new_amount: newAmount, auto_confirm: true } }).eq('id', user.id)
-            // Auto process
-            await supabase.from('transactions').update({ amount: newAmount }).eq('id', tx.id).eq('user_id', user.id)
-            await supabase.from('users').update({ pending_action: null }).eq('id', user.id)
-            await sendMessage(from, `✅ *Transaksi berhasil diupdate!*\n\n${tx.type === 'income' ? '💰' : '💸'} ${tx.description}\n💵 Rp ${fmt(tx.amount)} → *Rp ${fmt(newAmount)}*`)
+            // Simpan pending action, tunggu konfirmasi user
+            await supabase.from('users').update({ pending_action: { type: 'confirm_edit', tx_id: tx.id, new_amount: newAmount } }).eq('id', user.id)
             return c.json({ status: 'ok' })
           }
         }
