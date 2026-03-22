@@ -152,23 +152,16 @@ export async function handleConversation(
 ): Promise<string | null> {
   const lower = text.toLowerCase().trim()
   
-  // Deteksi apakah ini percakapan biasa (bukan transaksi)
-  const conversationalPatterns = [
-    /^(halo|hai|hi|hey|hei|pagi|siang|malam|selamat)/,
-    /^(makasih|terima kasih|thanks|thank you)/,
-    /^(oke|ok|siap|iya|ya|yep|yoi|sip)/,
-    /^(gimana|bagaimana|apa kabar|how are you)/,
-    /^(keren|bagus|mantap|good|nice|wow|hebat)/,
-    /^(cape|lelah|stress|sedih|senang|happy)/,
-    /^(gue|aku|saya).{0,20}(mau|lagi|baru|udah|sudah)/,
-  ]
-  
-  const isConversational = conversationalPatterns.some(p => p.test(lower))
-  
-  // Kalau ada angka, kemungkinan transaksi — jangan handle sebagai chat
+  // Kalau ada angka dan kata transaksi, kemungkinan transaksi — skip conversation
   const hasNumber = /\d/.test(text)
-  if (hasNumber && !isConversational) return null
-  if (!isConversational) return null
+  const transactionWords = ['rb', 'ribu', 'jt', 'juta', 'k', 'bayar', 'beli', 'makan', 'bensin', 'gaji', 'transfer', 'budget', 'nabung']
+  const looksLikeTransaction = hasNumber && transactionWords.some(w => lower.includes(w))
+  
+  if (looksLikeTransaction) return null
+  
+  // Kalau tidak ada angka sama sekali → pasti bukan transaksi, handle sebagai chat
+  // Kalau ada angka tapi tidak seperti transaksi → coba handle sebagai chat dulu
+  if (hasNumber && !looksLikeTransaction) return null
 
   const nama = userName || 'Sobat'
   const txSummary = recentTransactions?.slice(0, 3)
