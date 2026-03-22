@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { sendMessage, markAsRead, sendButtons, sendList } from '../services/whatsapp/client.js'
 import { parseTransaction, parseTransactions, generateInsight } from '../services/ai/parser.js'
+import { quickParse } from '../services/ai/quickParser.js'
 import { supabase } from '../lib/supabase.js'
 import { updateStreak, getProfile } from '../services/gamification.js'
 import { createPaymentLink } from '../services/midtrans.js'
@@ -658,7 +659,55 @@ Coba gratis via WhatsApp!`
         return c.json({ status: 'ok' })
       }
 
-      // ── Default: AI parsing transaksi (support multi) ──
+      // ── Default: AI parsing transaksi (quick parser + background AI) ──
+      
+      // Coba quick parse dulu (tanpa AI, instant)
+      const quickResult = quickParse(text)
+      
+      if (quickResult.matched && quickResult.amount && quickResult.amount > 0) {
+        // Quick parse berhasil — langsung simpan & balas cepat
+        const fmt2 = (n: number) => new Intl.NumberFormat('id-ID').format(n)
+        
+        await supabase.from('transactions').insert({
+          user_id: user.id,
+          type: quickResult.type,
+          amount: quickResult.amount,
+          category: quickResult.category,
+          description: quickResult.description
+        })
+
+        const { streak, newBadges } = await updateStreak(user.id)
+        const xpResult = await addXp(user.id, 'transaction', 10)
+        await updateWeeklyChallenge(user.id, 'transactions_5')
+        await updateWeeklyChallenge(user.id, 'daily_streak')
+        await initWeeklyChallenges(user.id)
+
+        const streakText2 = streak > 1 ? `\n🔥 Streak: ${streak} hari` : ''
+        const badgeText2 = newBadges.length > 0 ? `\n\n🎉 *Badge baru!*\n${newBadges.map((b: any) => `${b.emoji} ${b.name}`).join('\n')}` : ''
+        const motivasi2 = streak >= 7 ? `\n🔥 Keren banget ${user.name || 'kamu'}, streak ${streak} hari!` : streak >= 3 ? `\n⚡ Konsisten terus ya ${user.name || ''}!`.trim() : ''
+        const xpText2 = formatXpMessage(xpResult)
+
+        // Kirim respon cepat dulu
+        await sendMessage(from,
+          `${quickResult.type === 'income' ? '💰' : '💸'} *${quickResult.type === 'income' ? 'Pemasukan' : 'Pengeluaran'} dicatat!*\n\n` +
+          `📝 ${quickResult.description}\n🏷️ ${quickResult.category}\n💵 Rp ${fmt2(quickResult.amount!)}` +
+          `${streakText2}${motivasi2}${badgeText2}${xpText2}`
+        )
+
+        // Background: generate & kirim insight
+        const { data: recentTx2 } = await supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
+        generateInsight(
+          { description: quickResult.description!, amount: quickResult.amount!, category: quickResult.category!, type: quickResult.type! },
+          recentTx2 || [],
+          user.name || undefined
+        ).then(async (insight: string) => {
+          if (insight) await sendMessage(from, `💡 ${insight}`)
+        }).catch(() => {})
+
+        return c.json({ status: 'ok' })
+      }
+
+      // Quick parse gagal — fallback ke Claude AI
       const parseResult = await parseTransactions(text)
       console.log('Parsed:', parseResult)
 
